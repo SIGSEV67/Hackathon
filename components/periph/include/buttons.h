@@ -4,8 +4,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
+#include "esp_event.h"
 
 typedef enum {
     BTN_UP,
@@ -20,14 +19,16 @@ typedef enum {
     BTN_COUNT,
 } button_id_t;
 
-typedef struct {
-    button_id_t id;
-    bool pressed;
-} button_event_t;
+// Eventos en el loop por defecto de esp_event. event_data es un button_id_t.
+ESP_EVENT_DECLARE_BASE(BUTTONS_EVENT);
 
+typedef enum {
+    BUTTONS_EVENT_PRESSED,
+    BUTTONS_EVENT_RELEASED,
+} buttons_event_id_t;
+
+// Requiere el loop por defecto creado (esp_event_loop_create_default).
 esp_err_t buttons_init(void);
-
-QueueHandle_t buttons_event_queue(void);
 
 uint32_t buttons_read(void);
 

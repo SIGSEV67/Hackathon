@@ -10,11 +10,12 @@
 
 static const char *TAG = "buttons";
 
+ESP_EVENT_DEFINE_BASE(BUTTONS_EVENT);
+
 // Generalmente uno tiene un filtro pasabanda bajo para
 // filtrar la oscilacion de un boton, como no tenemos eso
 // por software esperamos un ratito. Esto se puede mejorar.
 #define DEBOUNCE_MS     20
-#define EVENT_QUEUE_LEN 16
 
 // btw chequeen: https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/gpio.html
 static const struct {
@@ -33,7 +34,6 @@ static const struct {
 };
 
 static QueueHandle_t s_isr_queue;
-static QueueHandle_t s_event_queue;
 
 static volatile uint32_t s_state;
 
@@ -124,10 +124,10 @@ static void buttons_task(void *arg)
         const uint32_t changed = state ^ s_state;
         s_state = state;
 
-        for (int i = 0; i < BTN_COUNT; i++) {
+        for (button_id_t i = 0; i < BTN_COUNT; i++) {
             if (changed & (1u << i)) {
-                const button_event_t ev = {.id = i, .pressed = !!(state & (1u << i))};
-                xQueueSend(s_event_queue, &ev, 0);
+                const int32_t ev = (state & (1u << i)) ? BUTTONS_EVENT_PRESSED : BUTTONS_EVENT_RELEASED;
+                esp_event_post(BUTTONS_EVENT, ev, &i, sizeof(i), pdMS_TO_TICKS(10));
             }
         }
     }
@@ -143,8 +143,7 @@ static void buttons_task(void *arg)
 esp_err_t buttons_init(void)
 {
     s_isr_queue = xQueueCreate(BTN_COUNT, sizeof(button_id_t));
-    s_event_queue = xQueueCreate(EVENT_QUEUE_LEN, sizeof(button_event_t));
-    ESP_RETURN_ON_FALSE(s_isr_queue && s_event_queue, ESP_ERR_NO_MEM, TAG, "no mem for queues");
+    ESP_RETURN_ON_FALSE(s_isr_queue, ESP_ERR_NO_MEM, TAG, "no mem for queue");
 
     ESP_RETURN_ON_FALSE(xTaskCreate(buttons_task, "buttons", 3072, NULL, 10, NULL) == pdPASS, ESP_ERR_NO_MEM, TAG,
                         "task create failed");
@@ -174,11 +173,6 @@ esp_err_t buttons_init(void)
     }
     s_state = state;
     return ESP_OK;
-}
-
-QueueHandle_t buttons_event_queue(void)
-{
-    return s_event_queue;
 }
 
 uint32_t buttons_read(void)

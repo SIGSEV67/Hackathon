@@ -2,11 +2,13 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_event.h"
 #include "esp_log.h"
 
 #include "audio.h"
 #include "buttons.h"
 #include "display.h"
+#include "noise.h"
 
 static const char *TAG = "demo";
 
@@ -67,9 +69,20 @@ static void draw_ui(uint32_t pressed, int mic_level, bool audio_ok)
     }
 }
 
+static void on_button(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    const button_id_t btn = *(const button_id_t *)data;
+    const bool pressed = id == BUTTONS_EVENT_PRESSED;
+    ESP_LOGI(TAG, "button %s %s", buttons_name(btn), pressed ? "pressed" : "released");
+    if (pressed) {
+        audio_play_tone(s_button_freq[btn], 100);
+    }
+}
+
 void app_main(void)
 {
     ESP_LOGI(TAG, "Hackathon board demo starting");
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     esp_err_t display_err = display_init();
     bool display_ok = display_err == ESP_OK;
@@ -87,7 +100,7 @@ void app_main(void)
         display_flush();
     }
 
-    bool audio_ok = audio_init() == ESP_OK;
+    bool audio_ok = audio_init() == ESP_OK && noise_init() == ESP_OK;
     if (audio_ok) {
         const int notes[] = {523, 659, 784};
         for (int i = 0; i < 3; i++) {
@@ -98,18 +111,13 @@ void app_main(void)
     }
     vTaskDelay(pdMS_TO_TICKS(500));
 
-    QueueHandle_t events = buttons_event_queue();
+    ESP_ERROR_CHECK(esp_event_handler_register(BUTTONS_EVENT, ESP_EVENT_ANY_ID, on_button, NULL));
+
     int log_div = 0;
     while (1) {
-        button_event_t ev;
-        if (xQueueReceive(events, &ev, pdMS_TO_TICKS(UI_PERIOD_MS)) == pdTRUE) {
-            ESP_LOGI(TAG, "button %s %s", buttons_name(ev.id), ev.pressed ? "pressed" : "released");
-            if (ev.pressed && audio_ok) {
-                audio_play_tone(s_button_freq[ev.id], 100);
-            }
-        }
+        vTaskDelay(pdMS_TO_TICKS(UI_PERIOD_MS));
 
-        int mic_level = audio_ok ? audio_mic_level() : 0;
+        int mic_level = audio_ok ? noise_level() : 0;
         if (display_ok) {
             draw_ui(buttons_read(), mic_level, audio_ok);
             display_flush();

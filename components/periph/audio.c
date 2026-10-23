@@ -22,7 +22,7 @@
 
 static const char *TAG = "audio";
 
-#define SAMPLE_RATE_HZ      16000
+#define SAMPLE_RATE_HZ      AUDIO_SAMPLE_RATE_HZ
 
 #define TONE_CHUNK_FRAMES   256
 #define MIC_CHUNK_FRAMES    256
@@ -32,7 +32,13 @@ static i2s_chan_handle_t s_tx;
 #endif
 static i2s_chan_handle_t s_rx;
 
-static volatile int s_mic_level;
+#define MIC_MAX_SINKS       4
+
+static struct mic_sink {
+    audio_mic_sink_t fn;
+    void *ctx;
+} s_sinks[MIC_MAX_SINKS];
+static volatile int s_sink_count;
 
 #if CONFIG_HACK_SPEAKER_ENABLE
 static esp_err_t speaker_init(void)
@@ -75,43 +81,59 @@ static esp_err_t mic_init(void)
     return i2s_channel_enable(s_rx);
 }
 
+// Elige el canal con mas energia: el mic PDM ocupa un solo slot del estereo y
+// el otro trae ruido o ceros.
+static int pick_channel(const int16_t *buf, int frames)
+{
+    int64_t energy[2] = {0, 0};
+    for (int ch = 0; ch < 2; ch++) {
+        int64_t sum = 0;
+        for (int i = 0; i < frames; i++) {
+            sum += buf[i * 2 + ch];
+        }
+        const int32_t mean = sum / frames;
+        for (int i = 0; i < frames; i++) {
+            const int32_t v = buf[i * 2 + ch] - mean;
+            energy[ch] += (int64_t)v * v;
+        }
+    }
+    return energy[1] > energy[0];
+}
+
 static void mic_task(void *arg)
 {
     int16_t buf[MIC_CHUNK_FRAMES * 2];
-    float smoothed = 0;
+    int16_t mono[MIC_CHUNK_FRAMES];
 
     while (1) {
         size_t bytes = 0;
         if (i2s_channel_read(s_rx, buf, sizeof(buf), &bytes, 1000) != ESP_OK) {
             continue;
         }
-        int frames = bytes / (2 * sizeof(int16_t));
+        const int frames = bytes / (2 * sizeof(int16_t));
         if (frames == 0) {
             continue;
         }
 
-        float best_rms = 0;
-        for (int ch = 0; ch < 2; ch++) {
-            int64_t sum = 0, sum_sq = 0;
-            for (int i = 0; i < frames; i++) {
-                int v = buf[i * 2 + ch];
-                sum += v;
-                sum_sq += (int64_t)v * v;
-            }
-            float mean = (float)sum / frames;
-            float var = (float)sum_sq / frames - mean * mean;
-            float rms = var > 0 ? sqrtf(var) : 0;
-            if (rms > best_rms) {
-                best_rms = rms;
-            }
+        const int ch = pick_channel(buf, frames);
+        for (int i = 0; i < frames; i++) {
+            mono[i] = buf[i * 2 + ch];
         }
-
-        float level = (20.0f * log10f(best_rms + 1.0f) - 20.0f) * (100.0f / 60.0f);
-        level = level < 0 ? 0 : (level > 100 ? 100 : level);
-
-        smoothed = level > smoothed ? level : smoothed * 0.8f + level * 0.2f;
-        s_mic_level = (int)(smoothed + 0.5f);
+        const int n = s_sink_count;
+        for (int i = 0; i < n; i++) {
+            s_sinks[i].fn(mono, frames, s_sinks[i].ctx);
+        }
     }
+}
+
+esp_err_t audio_mic_add_sink(audio_mic_sink_t fn, void *ctx)
+{
+    ESP_RETURN_ON_FALSE(fn, ESP_ERR_INVALID_ARG, TAG, "null sink");
+    ESP_RETURN_ON_FALSE(s_sink_count < MIC_MAX_SINKS, ESP_ERR_NO_MEM, TAG, "too many mic sinks");
+    s_sinks[s_sink_count] = (struct mic_sink){.fn = fn, .ctx = ctx};
+    // El mic task lee s_sink_count sin lock: se publica despues de escribir el slot.
+    __atomic_store_n(&s_sink_count, s_sink_count + 1, __ATOMIC_RELEASE);
+    return ESP_OK;
 }
 
 esp_err_t audio_init(void)
@@ -128,11 +150,6 @@ esp_err_t audio_init(void)
     ESP_LOGI(TAG, "microphone (PDM, I2S0) ready, speaker disabled");
 #endif
     return ESP_OK;
-}
-
-int audio_mic_level(void)
-{
-    return s_mic_level;
 }
 
 esp_err_t audio_play_tone(int freq_hz, int duration_ms)
