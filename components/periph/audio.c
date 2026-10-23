@@ -2,6 +2,7 @@
 #include <stdint.h>
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "driver/i2s_pdm.h"
 #include "driver/i2s_std.h"
@@ -27,8 +28,11 @@ static const char *TAG = "audio";
 #define TONE_CHUNK_FRAMES   256
 #define MIC_CHUNK_FRAMES    256
 
+#define SPEAKER_CHUNK_FRAMES 256
+
 #if CONFIG_HACK_SPEAKER_ENABLE
 static i2s_chan_handle_t s_tx;
+static SemaphoreHandle_t s_tx_lock;  // tonos, voces y llamadas comparten el parlante
 #endif
 static i2s_chan_handle_t s_rx;
 
@@ -60,6 +64,8 @@ static esp_err_t speaker_init(void)
         },
     };
     ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(s_tx, &std_cfg), TAG, "tx init failed");
+    s_tx_lock = xSemaphoreCreateMutex();
+    ESP_RETURN_ON_FALSE(s_tx_lock, ESP_ERR_NO_MEM, TAG, "no mem");
     return i2s_channel_enable(s_tx);
 }
 #endif
@@ -152,43 +158,65 @@ esp_err_t audio_init(void)
     return ESP_OK;
 }
 
+bool audio_has_speaker(void)
+{
+    return CONFIG_HACK_SPEAKER_ENABLE;
+}
+
+esp_err_t audio_speaker_write(const int16_t *samples, size_t count, uint32_t timeout_ms)
+{
+#if !CONFIG_HACK_SPEAKER_ENABLE
+    return ESP_ERR_NOT_SUPPORTED;
+#else
+    const int32_t volume_q8 = CONFIG_HACK_SPEAKER_VOLUME * 256 / 100;
+    int16_t chunk[SPEAKER_CHUNK_FRAMES * 2];
+    esp_err_t err = ESP_OK;
+    ESP_RETURN_ON_FALSE(xSemaphoreTake(s_tx_lock, pdMS_TO_TICKS(timeout_ms)) == pdTRUE, ESP_ERR_TIMEOUT, TAG,
+                        "speaker busy");
+    for (size_t done = 0; done < count && err == ESP_OK;) {
+        const size_t n = count - done < SPEAKER_CHUNK_FRAMES ? count - done : SPEAKER_CHUNK_FRAMES;
+        for (size_t i = 0; i < n; i++) {
+            const int16_t v = (int16_t)((samples[done + i] * volume_q8) >> 8);
+            chunk[i * 2] = v;  // el MAX98357A mezcla L y R por defecto
+            chunk[i * 2 + 1] = v;
+        }
+        size_t written = 0;
+        err = i2s_channel_write(s_tx, chunk, n * 2 * sizeof(int16_t), &written, timeout_ms);
+        done += n;
+    }
+    xSemaphoreGive(s_tx_lock);
+    return err;
+#endif
+}
+
 esp_err_t audio_play_tone(int freq_hz, int duration_ms)
 {
 #if !CONFIG_HACK_SPEAKER_ENABLE
     return ESP_ERR_NOT_SUPPORTED;
 #else
     const int total = SAMPLE_RATE_HZ * duration_ms / 1000;
-
     const int fade = SAMPLE_RATE_HZ / 200;
-
-    const float amp = 32767.0f * CONFIG_HACK_SPEAKER_VOLUME / 100.0f;
     const float step = 2.0f * (float)M_PI * freq_hz / SAMPLE_RATE_HZ;
 
-    int16_t chunk[TONE_CHUNK_FRAMES * 2];
+    int16_t chunk[TONE_CHUNK_FRAMES];
     float phase = 0;
-
     for (int done = 0; done < total;) {
-        int n = total - done < TONE_CHUNK_FRAMES ? total - done : TONE_CHUNK_FRAMES;
+        const int n = total - done < TONE_CHUNK_FRAMES ? total - done : TONE_CHUNK_FRAMES;
         for (int i = 0; i < n; i++) {
-            int pos = done + i;
+            const int pos = done + i;
             float env = 1.0f;
             if (pos < fade) {
                 env = (float)pos / fade;
             } else if (total - pos < fade) {
                 env = (float)(total - pos) / fade;
             }
-            int16_t s = (int16_t)(sinf(phase) * amp * env);
-            chunk[i * 2] = s;
-            chunk[i * 2 + 1] = s;
-
+            chunk[i] = (int16_t)(sinf(phase) * 20000.0f * env);
             phase += step;
             if (phase > 2.0f * (float)M_PI) {
                 phase -= 2.0f * (float)M_PI;
             }
         }
-        size_t written = 0;
-        ESP_RETURN_ON_ERROR(i2s_channel_write(s_tx, chunk, n * 2 * sizeof(int16_t), &written, 1000), TAG,
-                            "tone write failed");
+        ESP_RETURN_ON_ERROR(audio_speaker_write(chunk, n, 1000), TAG, "tone write failed");
         done += n;
     }
     return ESP_OK;

@@ -3,9 +3,12 @@
 #include "driver/gpio.h"
 #include "sdkconfig.h"
 
-#define BOARD_SPK_DIN_IO        GPIO_NUM_4
-#define BOARD_SPK_BCLK_IO       GPIO_NUM_5
-#define BOARD_SPK_LRCLK_IO      GPIO_NUM_6
+// Parlante: los pines salen de menuconfig (SIGSEV: hardware), por defecto 4/5/6.
+#if CONFIG_HACK_SPEAKER_ENABLE
+#define BOARD_SPK_DIN_IO        ((gpio_num_t)CONFIG_HACK_SPEAKER_DIN_GPIO)
+#define BOARD_SPK_BCLK_IO       ((gpio_num_t)CONFIG_HACK_SPEAKER_BCLK_GPIO)
+#define BOARD_SPK_LRCLK_IO      ((gpio_num_t)CONFIG_HACK_SPEAKER_LRCLK_GPIO)
+#endif
 
 #define BOARD_MIC_CLK_IO        GPIO_NUM_7
 #define BOARD_MIC_DOUT_IO       GPIO_NUM_15
