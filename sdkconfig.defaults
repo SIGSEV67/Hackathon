@@ -10,6 +10,8 @@ CONFIG_FREERTOS_HZ=1000
 # Los navegadores de los telefonos mandan headers largos.
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 CONFIG_HTTPD_MAX_URI_LEN=256
+# httpd (7 conexiones + internos) + DNS cautivo.
+CONFIG_LWIP_MAX_SOCKETS=16
 
 # Perfil por defecto: PSRAM octal de 8 MB. Usa internamente los GPIO 33-37, asi
 # que el display queda deshabilitado en este perfil.

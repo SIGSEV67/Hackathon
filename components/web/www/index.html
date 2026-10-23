@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#140E02">
+<title>SIGSEV · red mesh</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="logo">SIGSEV</span>
+    <span class="tag">red mesh sin internet</span>
+  </div>
+  <div class="status" id="status">conectando…</div>
+</header>
+
+<div class="banner" id="banner" hidden></div>
+
+<nav class="tabs" role="tablist">
+  <button role="tab" aria-selected="true" data-tab="feed">Alertas</button>
+  <button role="tab" aria-selected="false" data-tab="map">Red</button>
+  <button role="tab" aria-selected="false" data-tab="node">Nodo</button>
+</nav>
+
+<main>
+  <section id="tab-feed" class="tab">
+    <p class="hint">Mantené apretado para mandar a toda la red.</p>
+    <div class="alerts">
+      <button class="alert-btn sos" data-kind="0"><span>SOS</span><i></i></button>
+      <button class="alert-btn medic" data-kind="1"><span>MÉDICO</span><i></i></button>
+      <button class="alert-btn danger" data-kind="2"><span>PELIGRO</span><i></i></button>
+      <button class="alert-btn safe" data-kind="3"><span>ESTOY BIEN</span><i></i></button>
+    </div>
+
+    <form class="compose" id="compose">
+      <input id="text" maxlength="160" autocomplete="off" placeholder="Mensaje para todos (160)">
+      <button type="submit">Enviar</button>
+    </form>
+
+    <h2>Mensajes</h2>
+    <ul class="feed" id="feed"><li class="empty">Todavía no llegó nada.</li></ul>
+  </section>
+
+  <section id="tab-map" class="tab" hidden>
+    <svg id="map" viewBox="0 0 360 300" role="img" aria-label="Mapa de la red"></svg>
+    <div class="legend">
+      <span>ruido</span><span class="ramp"></span><span>bajo → alto</span>
+      <span class="sep">línea = enlace de radio (más gruesa, mejor señal)</span>
+    </div>
+    <table class="nodes">
+      <thead><tr><th>Nodo</th><th>Ruido</th><th>Saltos</th><th>Visto</th></tr></thead>
+      <tbody id="nodes"></tbody>
+    </table>
+  </section>
+
+  <section id="tab-node" class="tab" hidden>
+    <h2>Este nodo</h2>
+    <dl class="kv" id="self"></dl>
+    <form class="compose" id="rename">
+      <input id="name" maxlength="20" autocomplete="off" placeholder="Nombre (ej. Puesto médico)">
+      <button type="submit">Renombrar</button>
+    </form>
+    <h2>Tráfico</h2>
+    <dl class="kv" id="stats"></dl>
+    <p class="note">Cada nodo reenvía lo que escucha. Sin router, sin datos, sin cuentas:
+      si un nodo se cae, los mensajes siguen por los demás.</p>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>

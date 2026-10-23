@@ -15,6 +15,7 @@
 #include "noise.h"
 #include "presence.h"
 #include "radio.h"
+#include "web.h"
 
 static const char *TAG = "app";
 
@@ -54,6 +55,7 @@ void app_main(void)
     presence_self_name(name, sizeof(name));
     ESP_ERROR_CHECK(radio_init(name));
     ESP_ERROR_CHECK(mesh_start());
+    ESP_ERROR_CHECK(web_init());
 
     ESP_LOGI(TAG, "%s up", name);
 }
