@@ -8,6 +8,8 @@ celular colapsa, un corte de luz o un lugar sin señal.
 - **Alertas rápidas** (SOS, MÉDICO, PELIGRO, ESTOY BIEN) con un botón de la placa o desde el celular.
 - **Mensajes de voz** push-to-talk: se graban en la placa y viajan comprimidos por la mesh.
 - **Texto libre** desde el celular.
+- **Mensajes privados** (texto o voz) a un nodo puntual, aunque no esté en la red:
+  los demás nodos lo guardan y se lo pasan cuando aparece (store-and-forward).
 - **Mapa de la red y del ruido**: qué nodos hay, cómo están enlazados y cuánto ruido mide cada uno.
 
 Cada placa reenvía lo que escucha, así que si un nodo se cae los mensajes siguen
@@ -36,9 +38,14 @@ Nuestra apuesta está en lo que permite una radio con ~500× más ancho de banda
 | **KEY1** mantener 1 s | Alerta **SOS** |
 | **KEY2** mantener 1 s | Alerta **MÉDICO** |
 | **KEY3** mantener 1 s | Alerta **PELIGRO** |
-| **KEY4** (la apartada) mantener | Grabar voz (hasta 20 s). Al soltar se manda a toda la red |
+| **KEY4** (la apartada) mantener | Grabar voz (hasta 20 s). Al soltar se manda a toda la red, o en privado al nodo marcado en la pantalla Red |
 | Joystick ← → | Cambiar pantalla: Inicio / Mensajes / Red |
-| Joystick ↑ ↓ | Scroll; cierra el aviso de alerta recibida |
+| Joystick ↑ ↓ | Scroll; en Red mueve el cursor (Todos o un nodo); cierra el aviso de alerta recibida |
+
+La pantalla **Red** muestra el ID propio en el título y lista el historial de
+nodos conocidos (los que no están, con `--` y hace cuánto se los vio). Los
+privados aparecen con `@` en Mensajes; los propios dicen `a Nombre(ok)` cuando
+llegaron.
 
 KEY1–3 son los tres botones en fila de abajo; KEY4 es el que está apartado arriba
 a la derecha. La pantalla de inicio los dibuja en esa misma posición y los
@@ -51,11 +58,16 @@ un toque sin querer no dispare nada.
 2. El portal se abre solo; si no, entrar a `http://192.168.4.1/`.
 3. Pestañas:
    - **Alertas**: botones de alerta (mantener apretado), mensajes de texto y feed
-     con reproducción de voz.
+     con reproducción de voz. En **Para** se elige *Todos*, un nodo del historial
+     o *Otro ID…* (las 8 cifras, o las últimas si alcanzan para identificarlo).
+     Los privados propios muestran *en camino…* hasta que vuelve el ✓.
    - **Red**: mapa de nodos coloreados por ruido, con enlaces más gruesos cuanto mejor es la señal.
+     La lista incluye los nodos del historial que no están, con ✉ para escribirles.
    - **Nodo**: renombrar el nodo (ej. "Puesto médico") y estadísticas de tráfico.
 
-La placa no tiene parlante: las voces se escuchan en el celular.
+La placa no tiene parlante: las voces se escuchan en el celular. Las voces
+privadas salen de la placa: el celular no puede grabar porque el navegador solo
+da el micrófono en páginas HTTPS, y el portal es HTTP plano.
 
 ## Arquitectura
 
@@ -70,7 +82,7 @@ components/
   link/          interfaz de transporte de un salto + backend ESP-NOW
   mesh/          flooding con TTL y dedup, vecinos con RSSI, handlers por tipo
   presence/      beacons: directorio de nodos, nombres, ruido, topología
-  messages/      alertas, texto y voz + store (PSRAM si hay)
+  messages/      alertas, texto y voz + store (PSRAM si hay) + courier de privados
   web/           DNS cautivo, servidor HTTP, API JSON y app web embebida
   ui/            pantallas del OLED (o log en el perfil sin display)
 ```
@@ -107,12 +119,34 @@ versión, tipo, TTL, saltos, seq y origen. Cada nodo reenvía una sola vez cada
 |---|---|
 | `PRESENCE` | nombre, capacidades, ruido, uptime, vecinos con RSSI (cada ~3 s) |
 | `ALERT` | tipo de alerta |
-| `TEXT` | hasta 160 bytes UTF-8 |
-| `VOICE` | un bloque de 55 ms de IMA ADPCM a 8 kHz, con su propio estado del códec |
+| `TEXT` | origen, ref, destino y hasta 160 bytes UTF-8 |
+| `VOICE` | origen, ref, destino y un bloque de 55 ms de IMA ADPCM a 8 kHz, con su propio estado del códec |
+| `ACK` | origen y ref del privado que llegó |
 
 Como cada bloque de voz se puede decodificar solo, un paquete perdido es un
 silencio de 55 ms y no corta el resto del mensaje. Un mensaje de 20 s son ~360
 paquetes, unos 80 KB.
+
+#### Privados: store-and-forward
+
+Un privado (destino ≠ 0) viaja igual que un mensaje para todos, pero solo lo
+muestran el destino y quien lo mandó; el resto de los nodos lo guarda **en
+custodia**. Texto y voz llevan su identidad `(origen, ref)` en el payload, así
+un custodio puede reenviarlo tal cual y nadie lo muestra dos veces.
+
+- Cuando un nodo con privados pendientes ve aparecer al destino (su beacon de
+  presencia), espera entre 0,5 y 3 s al azar y lo reenvía. Si en ese tiempo
+  escucha que otro ya lo reenvió, no lo hace: así no lo mandan todos a la vez.
+- Mientras el destino siga en la red y no confirme, se reintenta cada ~20 s,
+  hasta 5 veces por aparición.
+- El destino contesta con un `ACK` que se inunda por la red: el que lo escucha
+  marca el mensaje como entregado y deja de insistir. Si el origen no estaba,
+  el ACK se le reenvía cuando aparece.
+- El historial de nodos (id y último nombre) se guarda en NVS, así se le puede
+  escribir a un nodo que no está aunque la placa se haya reiniciado.
+
+Ojo: **privado = dirigido, no cifrado.** Cualquier nodo de la red puede leer
+el contenido; solo no lo muestra.
 
 Todos los nodos tienen que usar el mismo canal WiFi (`menuconfig` → *SIGSEV: radio*).
 
