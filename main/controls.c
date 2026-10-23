@@ -33,7 +33,7 @@ static esp_timer_handle_t s_hold_timers[ALERT_KEYS];
 static void on_hold(void *arg)
 {
     const alert_kind_t alert = (alert_kind_t)(uintptr_t)arg;
-    if (messages_send_alert(alert) != ESP_OK) {
+    if (messages_send_alert(mesh_self_id(), alert) != ESP_OK) {
         ESP_LOGE(TAG, "could not send %s", messages_alert_label(alert));
     }
 }

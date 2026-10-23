@@ -91,7 +91,7 @@ static void ago(uint32_t ms, char *out, size_t len)
 static void describe(const message_t *m, char *out, size_t len)
 {
     // Privado propio: "a Nombre: ..." para saber a quien fue.
-    if (m->dest != MESSAGES_TO_ALL && m->hops == MESSAGE_HOPS_SELF) {
+    if (m->dest != MESSAGES_TO_ALL && m->origin == mesh_self_id()) {
         char to[PRESENCE_NAME_MAX + 1];
         presence_name_of(m->dest, to, sizeof(to));
         const int n = snprintf(out, len, "a %s%s: ", to, m->delivered ? "(ok)" : "");
@@ -202,7 +202,7 @@ static void draw_home(void)
         presence_name_of(last.origin, from, sizeof(from));
         ago(mesh_now_ms() - last.received_ms, when, sizeof(when));
         char summary[COLS + PRESENCE_NAME_MAX + 16];
-        snprintf(summary, sizeof(summary), "%s %s %s", what, when, last.hops == MESSAGE_HOPS_SELF ? "(vos)" : from);
+        snprintf(summary, sizeof(summary), "%s %s %s", what, when, last.origin == mesh_self_id() ? "(vos)" : from);
         text(0, 31, summary, last.kind == MESSAGE_ALERT && last.alert != ALERT_SAFE);
     } else {
         text(0, 31, "Sin mensajes", false);

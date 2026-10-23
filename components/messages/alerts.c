@@ -11,6 +11,7 @@ static const char *TAG = "alerts";
 
 typedef struct __attribute__((packed)) {
     uint8_t kind;
+    uint32_t origin;  // la placa o el celu que la mando
 } wire_alert_t;
 
 // origin va en el payload: un custodio reenvia con su propio header de mesh.
@@ -28,24 +29,29 @@ _Static_assert(sizeof(wire_text_t) <= MESH_PAYLOAD_MAX, "text does not fit in a 
 
 static void save(message_t *msg)
 {
-    if (store_add(msg, &msg->id) == ESP_OK && messages_is_visible(msg)) {
+    if (store_add(msg, &msg->id) == ESP_OK && messages_is_local(msg)) {
         messages_notify(MESSAGES_EVENT_NEW, msg->id);
     }
 }
 
 static void on_alert(const mesh_rx_meta_t *meta, const void *payload, size_t len, void *ctx)
 {
-    const wire_alert_t *w = payload;
-    if (len < sizeof(*w) || w->kind >= ALERT_COUNT) {
+    wire_alert_t w = {0};
+    if (len < 1) {
         return;
     }
-    ESP_LOGW(TAG, "%s from %08" PRIx32 " (%u hops)", messages_alert_label(w->kind), meta->origin, meta->hops);
+    memcpy(&w, payload, len < sizeof(w) ? len : sizeof(w));
+    if (w.kind >= ALERT_COUNT) {
+        return;
+    }
+    const mesh_node_id_t origin = len >= sizeof(w) && w.origin ? w.origin : meta->origin;
+    ESP_LOGW(TAG, "%s from %08" PRIx32 " (%u hops)", messages_alert_label(w.kind), origin, meta->hops);
     save(&(message_t){
         .kind = MESSAGE_ALERT,
-        .origin = meta->origin,
+        .origin = origin,
         .hops = meta->hops,
         .received_ms = mesh_now_ms(),
-        .alert = w->kind,
+        .alert = w.kind,
     });
 }
 
@@ -65,7 +71,7 @@ static void on_text(const mesh_rx_meta_t *meta, const void *payload, size_t len,
     if (store_find(w.origin, w.ref, &id)) {
         courier_heard(id);
         message_t known;
-        if (w.dest == mesh_self_id() && store_get(id, &known)) {
+        if (store_get(id, &known) && messages_dest_is_here(&known)) {
             courier_ack(&known);  // nuestro ACK se pudo haber perdido
         }
         return;
@@ -88,7 +94,7 @@ static void on_text(const mesh_rx_meta_t *meta, const void *payload, size_t len,
         ESP_LOGI(TAG, "%s from %08" PRIx32 ": %s", msg.dest ? "private text" : "text", msg.origin, msg.text);
     }
     save(&msg);
-    if (msg.id && msg.dest == mesh_self_id()) {
+    if (msg.id && messages_dest_is_here(&msg)) {
         courier_ack(&msg);
     }
 }
@@ -113,14 +119,15 @@ esp_err_t alerts_resend_text(const message_t *msg)
     return send_text_wire(msg);
 }
 
-esp_err_t messages_send_alert(alert_kind_t kind)
+esp_err_t messages_send_alert(mesh_node_id_t from, alert_kind_t kind)
 {
     ESP_RETURN_ON_FALSE(kind < ALERT_COUNT, ESP_ERR_INVALID_ARG, TAG, "bad alert kind");
-    const wire_alert_t w = {.kind = kind};
+    ESP_RETURN_ON_FALSE(messages_valid_sender(from), ESP_ERR_INVALID_ARG, TAG, "unknown sender");
+    const wire_alert_t w = {.kind = kind, .origin = from};
     ESP_RETURN_ON_ERROR(mesh_send(MESH_TYPE_ALERT, &w, sizeof(w), pdMS_TO_TICKS(100)), TAG, "send failed");
     save(&(message_t){
         .kind = MESSAGE_ALERT,
-        .origin = mesh_self_id(),
+        .origin = from,
         .hops = MESSAGE_HOPS_SELF,
         .received_ms = mesh_now_ms(),
         .alert = kind,
@@ -128,15 +135,16 @@ esp_err_t messages_send_alert(alert_kind_t kind)
     return ESP_OK;
 }
 
-esp_err_t messages_send_text(mesh_node_id_t dest, const char *text)
+esp_err_t messages_send_text(mesh_node_id_t from, mesh_node_id_t dest, const char *text)
 {
     const size_t len = strlen(text);
     ESP_RETURN_ON_FALSE(len > 0 && len <= MESSAGES_TEXT_MAX, ESP_ERR_INVALID_SIZE, TAG, "bad text length");
-    ESP_RETURN_ON_FALSE(dest != mesh_self_id(), ESP_ERR_INVALID_ARG, TAG, "can't send to self");
+    ESP_RETURN_ON_FALSE(messages_valid_sender(from), ESP_ERR_INVALID_ARG, TAG, "unknown sender");
+    ESP_RETURN_ON_FALSE(dest != from, ESP_ERR_INVALID_ARG, TAG, "can't send to self");
 
     message_t msg = {
         .kind = MESSAGE_TEXT,
-        .origin = mesh_self_id(),
+        .origin = from,
         .ref = messages_next_ref(),
         .dest = dest,
         .hops = MESSAGE_HOPS_SELF,

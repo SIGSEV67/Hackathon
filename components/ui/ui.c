@@ -41,10 +41,10 @@ static void on_message(void *arg, esp_event_base_t base, int32_t event, void *da
 {
     const uint32_t id = *(const uint32_t *)data;
     message_t msg;
-    if (!id || !messages_get(id, &msg)) {
-        return;
+    if (!id || !messages_get(id, &msg) || !messages_for_board(&msg)) {
+        return;  // lo de los celus no se avisa en la placa
     }
-    const bool own = msg.hops == MESSAGE_HOPS_SELF;
+    const bool own = msg.origin == mesh_self_id();
 
     if (event == MESSAGES_EVENT_NEW) {
         if (own) {

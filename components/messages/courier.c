@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <string.h>
 
 #include "esp_check.h"
@@ -21,6 +22,11 @@
 // lo reenvian todos a la vez). Mientras el destino siga vivo y no confirme, se
 // reintenta cada tanto, hasta un tope. El destino confirma con un ACK que se
 // inunda por la red; quien lo escucha deja de reenviar.
+//
+// El destino puede ser un celu: "entregado" es que llego a su placa, y
+// "leido" que el celu lo vio (segundo ACK). Si el celu se pasa a otra placa
+// antes de verlo, se le vuelve a mandar ahi; y si la placa nueva ya lo tenia en
+// custodia, lo entrega directamente.
 
 static const char *TAG = "courier";
 
@@ -32,9 +38,15 @@ static const char *TAG = "courier";
 #define ACK_THROTTLE_MS  3000
 #define MAX_AGE_MS       (2 * 60 * 60 * 1000)  // despues de 2 h dejamos de insistir
 
+typedef enum {
+    ACK_DELIVERED = 0,
+    ACK_READ = 1,
+} ack_kind_t;
+
 typedef struct __attribute__((packed)) {
     uint32_t origin;
     uint16_t ref;
+    uint8_t kind;  // ack_kind_t
 } wire_ack_t;
 
 typedef struct {
@@ -44,6 +56,7 @@ typedef struct {
     uint32_t due_ms;        // reenvio agendado (0 = ninguno)
     uint32_t scheduled_ms;  // cuando se agendo, para saber si alguien se adelanto
     uint32_t last_ack_ms;
+    uint8_t last_ack_kind;
     uint8_t attempts;
 } track_t;
 
@@ -83,33 +96,56 @@ static track_t *track_of(uint32_t id)
     return t;
 }
 
+static bool is_private(const message_t *m)
+{
+    return m->kind != MESSAGE_ALERT && m->dest != MESSAGES_TO_ALL;
+}
+
+// Privado cuyo destino no esta aca y que todavia no llego a su placa:
+// reintentar mientras el destino este vivo.
 static bool needs_courier(const message_t *m)
 {
-    return m->kind != MESSAGE_ALERT && m->dest != MESSAGES_TO_ALL && m->dest != mesh_self_id() && !m->delivered;
+    return is_private(m) && !messages_dest_is_here(m) && !m->delivered;
 }
 
-static bool is_delivered_private(const message_t *m)
+// Privado que todavia puede tener que salir de aca: sin entregar, o entregado
+// a un celu que no lo vio (si se cambia de placa, hay que llevarselo).
+static bool pending(const message_t *m)
 {
-    return m->kind != MESSAGE_ALERT && m->dest != MESSAGES_TO_ALL && m->delivered;
+    return is_private(m) && !messages_dest_is_here(m) && !m->read;
 }
 
-static void send_ack(const message_t *msg)
+static void send_ack(const message_t *msg, ack_kind_t kind)
 {
     const uint32_t now = mesh_now_ms();
     LOCK();
     track_t *t = track_of(msg->id);
-    const bool throttled = t->last_ack_ms && now - t->last_ack_ms < ACK_THROTTLE_MS;
+    const bool throttled = t->last_ack_ms && t->last_ack_kind == kind && now - t->last_ack_ms < ACK_THROTTLE_MS;
     if (!throttled) {
         t->last_ack_ms = now;
+        t->last_ack_kind = kind;
     }
     UNLOCK();
     if (throttled) {
         return;
     }
-    const wire_ack_t w = {.origin = msg->origin, .ref = msg->ref};
+    const wire_ack_t w = {.origin = msg->origin, .ref = msg->ref, .kind = kind};
     if (mesh_send(MESH_TYPE_ACK, &w, sizeof(w), pdMS_TO_TICKS(50)) == ESP_OK) {
-        ESP_LOGI(TAG, "ack %08" PRIx32 "/%u", msg->origin, msg->ref);
+        ESP_LOGI(TAG, "%s %08" PRIx32 "/%u", kind == ACK_READ ? "read" : "ack", msg->origin, msg->ref);
     }
+}
+
+// La confirmacion que corresponde a lo que sabemos del mensaje.
+static ack_kind_t ack_kind_of(const message_t *m)
+{
+    return m->read ? ACK_READ : ACK_DELIVERED;
+}
+
+static void schedule(track_t *t, uint32_t now)
+{
+    t->attempts = 0;
+    t->due_ms = now + random_between(BACKOFF_MIN_MS, BACKOFF_MAX_MS);
+    t->scheduled_ms = now;
 }
 
 static void resend(const message_t *msg)
@@ -133,8 +169,9 @@ static void resend(const message_t *msg)
              msg->dest, esp_err_to_name(err));
 }
 
-// Aparecio un nodo: agendar los privados para el y reenviarle los ACKs de los
-// suyos que ya sabemos entregados (el ACK original se lo pudo haber perdido).
+// Aparecio un nodo o un celu (o un celu cambio de placa): agendar los privados
+// para el, entregar los que ya teniamos si ahora cuelga de aca, y reenviarle
+// las confirmaciones de los suyos (las originales se le pudieron perder).
 static void on_node_joined(mesh_node_id_t node)
 {
     const uint32_t now = mesh_now_ms();
@@ -145,16 +182,19 @@ static void on_node_joined(mesh_node_id_t node)
             continue;
         }
         const message_t *m = &msg;
-        if (needs_courier(m) && m->dest == node) {
+        if (!is_private(m)) {
+            continue;
+        }
+        if (m->dest == node && messages_dest_is_here(m) && !m->delivered) {
+            ESP_LOGI(TAG, "%08" PRIx32 " moved here, delivering %08" PRIx32 "/%u", node, m->origin, m->ref);
+            courier_ack(m);
+        } else if (m->dest == node && pending(m)) {
             LOCK();
-            track_t *t = track_of(m->id);
-            t->attempts = 0;
-            t->due_ms = now + random_between(BACKOFF_MIN_MS, BACKOFF_MAX_MS);
-            t->scheduled_ms = now;
+            schedule(track_of(m->id), now);
             UNLOCK();
             ESP_LOGI(TAG, "%08" PRIx32 " is here, scheduling %08" PRIx32 "/%u", node, m->origin, m->ref);
-        } else if (is_delivered_private(m) && m->origin == node) {
-            send_ack(m);
+        } else if (m->delivered && m->origin == node) {
+            send_ack(m, ack_kind_of(m));
         }
     }
 }
@@ -162,7 +202,7 @@ static void on_node_joined(mesh_node_id_t node)
 static void tick(void)
 {
     const uint32_t now = mesh_now_ms();
-    const size_t n = store_ids(s_scan, STORE_MAX_MESSAGES, needs_courier);
+    const size_t n = store_ids(s_scan, STORE_MAX_MESSAGES, pending);
     for (size_t i = 0; i < n; i++) {
         message_t msg;
         if (!store_get(s_scan[i], &msg)) {
@@ -185,7 +225,7 @@ static void tick(void)
                     t->last_tx_ms = now;
                 }
             }
-        } else if (t->attempts < MAX_ATTEMPTS && presence_is_alive(m->dest)) {
+        } else if (needs_courier(m) && t->attempts < MAX_ATTEMPTS && presence_is_alive(m->dest)) {
             const uint32_t last = (int32_t)(t->last_heard_ms - t->last_tx_ms) > 0 ? t->last_heard_ms : t->last_tx_ms;
             if (now - last > RETRY_MS) {
                 t->due_ms = now + random_between(0, BACKOFF_MAX_MS);
@@ -218,14 +258,19 @@ static void on_presence(void *arg, esp_event_base_t base, int32_t event_id, void
 
 static void on_ack(const mesh_rx_meta_t *meta, const void *payload, size_t len, void *ctx)
 {
-    wire_ack_t w;
-    if (len < sizeof(w)) {
+    wire_ack_t w = {0};
+    if (len < offsetof(wire_ack_t, kind)) {
         return;
     }
-    memcpy(&w, payload, sizeof(w));
+    memcpy(&w, payload, len < sizeof(w) ? len : sizeof(w));
     uint32_t id;
-    if (store_find(w.origin, w.ref, &id) && store_set_delivered(id)) {
-        ESP_LOGI(TAG, "%08" PRIx32 "/%u delivered (ack from %08" PRIx32 ")", w.origin, w.ref, meta->origin);
+    if (!store_find(w.origin, w.ref, &id)) {
+        return;
+    }
+    const bool read = w.kind == ACK_READ;
+    if (read ? store_set_read(id) : store_set_delivered(id)) {
+        ESP_LOGI(TAG, "%08" PRIx32 "/%u %s (ack from %08" PRIx32 ")", w.origin, w.ref, read ? "read" : "delivered",
+                 meta->origin);
         messages_notify(MESSAGES_EVENT_DELIVERED, id);
     }
 }
@@ -246,8 +291,19 @@ esp_err_t courier_init(void)
 
 void courier_ack(const message_t *msg)
 {
-    store_set_delivered(msg->id);
-    send_ack(msg);
+    // La placa ve un privado en cuanto le llega; un celu, cuando lo abre.
+    if (msg->dest == mesh_self_id()) {
+        store_set_read(msg->id);
+    } else {
+        store_set_delivered(msg->id);
+    }
+    message_t now;
+    send_ack(msg, store_get(msg->id, &now) ? ack_kind_of(&now) : ACK_DELIVERED);
+}
+
+void courier_read(const message_t *msg)
+{
+    send_ack(msg, ACK_READ);
 }
 
 void courier_heard(uint32_t id)

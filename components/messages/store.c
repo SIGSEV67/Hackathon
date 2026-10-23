@@ -173,6 +173,20 @@ bool store_find(mesh_node_id_t origin, uint16_t ref, uint32_t *out_id)
     return found;
 }
 
+bool store_set_read(uint32_t id)
+{
+    bool changed = false;
+    LOCK();
+    slot_t *slot = find(id);
+    if (slot && !slot->msg.read) {
+        slot->msg.read = true;
+        slot->msg.delivered = true;
+        changed = true;
+    }
+    UNLOCK();
+    return changed;
+}
+
 bool store_set_delivered(uint32_t id)
 {
     bool changed = false;
@@ -291,13 +305,14 @@ bool store_get(uint32_t id, message_t *out)
     return slot != NULL;
 }
 
-size_t store_list(message_t *out, size_t max, uint32_t after_id, bool (*keep)(const message_t *))
+size_t store_list(message_t *out, size_t max, uint32_t after_id, bool (*keep)(const message_t *, void *ctx),
+                  void *ctx)
 {
     size_t n = 0;
     LOCK();
     for (int i = 1; i <= MAX_MESSAGES && n < max; i++) {
         const slot_t *slot = &s_slots[(s_head - i + MAX_MESSAGES) % MAX_MESSAGES];
-        if (slot->used && slot->msg.id > after_id && (!keep || keep(&slot->msg))) {
+        if (slot->used && slot->msg.id > after_id && (!keep || keep(&slot->msg, ctx))) {
             out[n++] = slot->msg;
         }
     }

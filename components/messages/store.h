@@ -27,8 +27,10 @@ esp_err_t store_add_blocks(const message_t *msg, uint32_t *out_id);
 // Busca un texto o voz por su identidad en la red (origin, ref).
 bool store_find(mesh_node_id_t origin, uint16_t ref, uint32_t *out_id);
 
-// Marca un privado como entregado. Devuelve true si no lo estaba.
+// Marca un privado como entregado / leido (leido implica entregado). Devuelven
+// true si cambio.
 bool store_set_delivered(uint32_t id);
+bool store_set_read(uint32_t id);
 
 void store_remove(uint32_t id);
 
@@ -48,7 +50,8 @@ void store_voice_set_gain(uint32_t id, uint16_t gain_q8);
 bool store_get(uint32_t id, message_t *out);
 
 // Del mas nuevo al mas viejo, con id > after_id y que pasen `keep` (NULL = todos).
-size_t store_list(message_t *out, size_t max, uint32_t after_id, bool (*keep)(const message_t *));
+size_t store_list(message_t *out, size_t max, uint32_t after_id, bool (*keep)(const message_t *, void *ctx),
+                  void *ctx);
 size_t store_count(bool (*keep)(const message_t *));
 
 // Ids de los mensajes que pasan `keep`, del mas nuevo al mas viejo. Para

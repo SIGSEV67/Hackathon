@@ -208,7 +208,7 @@ static void on_voice(const mesh_rx_meta_t *meta, const void *payload, size_t len
         if (store_add_blocks(&msg, &id) != ESP_OK) {
             return;
         }
-        if (messages_is_visible(&msg)) {
+        if (messages_is_local(&msg)) {
             ESP_LOGI(TAG, "incoming %svoice from %08" PRIx32 " (%u ms)", msg.dest ? "private " : "", msg.origin,
                      w.count * BLOCK_MS);
             messages_notify(MESSAGES_EVENT_NEW, id);
@@ -229,17 +229,17 @@ static void on_voice(const mesh_rx_meta_t *meta, const void *payload, size_t len
     if (err == ESP_ERR_INVALID_STATE) {
         // Bloque repetido: alguien mas esta reenviando este mensaje.
         courier_heard(id);
-        if (msg.dest == mesh_self_id() && msg.blocks_received == msg.blocks) {
+        if (messages_dest_is_here(&msg) && msg.blocks_received == msg.blocks) {
             courier_ack(&msg);  // nuestro ACK se pudo haber perdido
         }
         return;
     }
     if (err == ESP_OK && completed) {
         ESP_LOGI(TAG, "voice %" PRIu32 " complete", id);
-        if (messages_is_visible(&msg)) {
+        if (messages_is_local(&msg)) {
             messages_notify(MESSAGES_EVENT_UPDATED, id);
         }
-        if (msg.dest == mesh_self_id()) {
+        if (messages_dest_is_here(&msg)) {
             courier_ack(&msg);
         }
     }
@@ -315,16 +315,18 @@ bool messages_voice_recording(uint32_t *elapsed_ms)
 
 // --- importar (voz subida desde el celular) ------------------------------------------
 
-esp_err_t messages_voice_import_begin(mesh_node_id_t dest, uint32_t samples, uint32_t *out_id)
+esp_err_t messages_voice_import_begin(mesh_node_id_t from, mesh_node_id_t dest, uint32_t samples,
+                                      uint32_t *out_id)
 {
-    ESP_RETURN_ON_FALSE(dest != mesh_self_id(), ESP_ERR_INVALID_ARG, TAG, "can't send to self");
+    ESP_RETURN_ON_FALSE(messages_valid_sender(from), ESP_ERR_INVALID_ARG, TAG, "unknown sender");
+    ESP_RETURN_ON_FALSE(dest != from, ESP_ERR_INVALID_ARG, TAG, "can't send to self");
     ESP_RETURN_ON_FALSE(samples > 0, ESP_ERR_INVALID_SIZE, TAG, "empty voice");
     uint32_t blocks = (samples + MESSAGES_VOICE_BLOCK_SAMPLES - 1) / MESSAGES_VOICE_BLOCK_SAMPLES;
     blocks = blocks > MAX_BLOCKS ? MAX_BLOCKS : blocks;  // lo que sobre se corta
 
     const message_t msg = {
         .kind = MESSAGE_VOICE,
-        .origin = mesh_self_id(),
+        .origin = from,
         .ref = messages_next_ref(),
         .dest = dest,
         .hops = MESSAGE_HOPS_SELF,

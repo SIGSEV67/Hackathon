@@ -77,7 +77,7 @@ static bool find_or_add(uint32_t origin, uint16_t ref, uint32_t dest, uint16_t c
     if (store_add_blocks(&msg, id) != ESP_OK) {
         return false;
     }
-    if (messages_is_visible(&msg)) {
+    if (messages_is_local(&msg)) {
         ESP_LOGI(TAG, "incoming %sfile from %08" PRIx32 " (%u chunks)", dest ? "private " : "", origin, count);
         messages_notify(MESSAGES_EVENT_NEW, *id);
     } else {
@@ -108,7 +108,7 @@ static void on_info(const mesh_rx_meta_t *meta, const void *payload, size_t len,
         name[w.name_len] = '\0';
         w.mime[MESSAGES_MIME_MAX] = '\0';
         store_set_file_info(id, w.size, name, w.mime);
-        if (messages_is_visible(&msg)) {
+        if (messages_is_local(&msg)) {
             messages_notify(MESSAGES_EVENT_UPDATED, id);
         }
     }
@@ -139,17 +139,17 @@ static void on_chunk(const mesh_rx_meta_t *meta, const void *payload, size_t len
     }
     if (err == ESP_ERR_INVALID_STATE) {
         courier_heard(id);  // repetido: alguien mas lo esta mandando
-        if (msg.dest == mesh_self_id() && msg.blocks_received == msg.blocks) {
+        if (messages_dest_is_here(&msg) && msg.blocks_received == msg.blocks) {
             courier_ack(&msg);
         }
         return;
     }
     if (err == ESP_OK && completed) {
         ESP_LOGI(TAG, "file %" PRIu32 " complete (%s)", id, msg.text[0] ? msg.text : "sin datos todavia");
-        if (messages_is_visible(&msg)) {
+        if (messages_is_local(&msg)) {
             messages_notify(MESSAGES_EVENT_UPDATED, id);
         }
-        if (msg.dest == mesh_self_id()) {
+        if (messages_dest_is_here(&msg)) {
             courier_ack(&msg);
         }
     }
@@ -204,15 +204,16 @@ size_t messages_file_max_bytes(void)
     return MAX_BYTES;
 }
 
-esp_err_t messages_file_begin(mesh_node_id_t dest, const char *name, const char *mime, uint32_t size,
-                              uint32_t *out_id)
+esp_err_t messages_file_begin(mesh_node_id_t from, mesh_node_id_t dest, const char *name, const char *mime,
+                              uint32_t size, uint32_t *out_id)
 {
-    ESP_RETURN_ON_FALSE(dest != mesh_self_id(), ESP_ERR_INVALID_ARG, TAG, "can't send to self");
+    ESP_RETURN_ON_FALSE(messages_valid_sender(from), ESP_ERR_INVALID_ARG, TAG, "unknown sender");
+    ESP_RETURN_ON_FALSE(dest != from, ESP_ERR_INVALID_ARG, TAG, "can't send to self");
     ESP_RETURN_ON_FALSE(size > 0 && size <= MAX_BYTES, ESP_ERR_INVALID_SIZE, TAG, "file of %" PRIu32 " bytes",
                         size);
     message_t msg = {
         .kind = MESSAGE_FILE,
-        .origin = mesh_self_id(),
+        .origin = from,
         .ref = messages_next_ref(),
         .dest = dest,
         .hops = MESSAGE_HOPS_SELF,

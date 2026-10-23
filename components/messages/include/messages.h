@@ -12,11 +12,17 @@
 // llega (y lo propio) queda en un store local para mostrarlo en el display o
 // servirlo al telefono.
 //
-// Texto y voz pueden ser privados (dest != MESSAGES_TO_ALL). Un privado viaja
-// igual que los demas, pero solo lo muestran el destino y quien lo mando; los
-// otros nodos lo guardan en custodia y se lo reenvian al destino cuando lo
-// ven aparecer en la red (store-and-forward). El destino confirma con un ACK.
-// Ojo: privado = dirigido, no cifrado.
+// Quien manda o recibe es un "cliente": la placa misma (botones y OLED) o un
+// celu colgado de una placa (ver presence). Cada uno ve lo que es para todos,
+// lo que le mandaron y lo suyo; el store de una placa guarda ademas lo de sus
+// celus y lo que lleva en custodia.
+//
+// Texto, voz y archivos pueden ser privados (dest != MESSAGES_TO_ALL). Un
+// privado viaja igual que los demas; los nodos donde no esta el destino lo
+// guardan en custodia y se lo reenvian cuando lo ven aparecer en la red
+// (store-and-forward). Confirmaciones: "entregado" cuando llega a la placa del
+// destino, y "leido" cuando el celu destino lo vio. Ojo: privado = dirigido,
+// no cifrado.
 
 #define MESSAGES_TEXT_MAX            160
 #define MESSAGES_VOICE_SAMPLE_RATE   8000
@@ -47,7 +53,8 @@ typedef struct {
     mesh_node_id_t origin;
     uint16_t ref;            // identifica el mensaje dentro de su origen, igual en todos los nodos
     mesh_node_id_t dest;     // MESSAGES_TO_ALL o el nodo destino de un privado
-    bool delivered;          // privado: el destino confirmo que le llego
+    bool delivered;          // privado: llego a la placa del destino
+    bool read;               // privado a un celu: el celu lo vio
     uint8_t hops;            // 0 = vecino directo; MESSAGE_HOPS_SELF = propio
     uint32_t received_ms;    // mesh_now_ms() local
     alert_kind_t alert;      // MESSAGE_ALERT
@@ -75,22 +82,31 @@ esp_err_t messages_init(void);
 
 const char *messages_alert_label(alert_kind_t kind);
 
-// Si el mensaje se muestra en este nodo: es para todos, para nosotros o nuestro.
-bool messages_is_visible(const message_t *m);
-// Privado ajeno que este nodo guarda para reenviarlo.
+// Si el mensaje le corresponde al usuario de la placa (OLED): es para todos,
+// para la placa o lo mando la placa.
+bool messages_for_board(const message_t *m);
+// Idem para un celu: para todos, para el o suyo.
+bool messages_for_client(const message_t *m, mesh_node_id_t client);
+// Privado ajeno (ni de la placa ni de sus celus) que guardamos para reenviarlo.
 bool messages_in_transit(const message_t *m);
 
-esp_err_t messages_send_alert(alert_kind_t kind);
-esp_err_t messages_send_text(mesh_node_id_t dest, const char *text);
+// `from` es la placa (mesh_self_id()) o un celu conectado a ella.
+esp_err_t messages_send_alert(mesh_node_id_t from, alert_kind_t kind);
+esp_err_t messages_send_text(mesh_node_id_t from, mesh_node_id_t dest, const char *text);
 
-// Grabacion push-to-talk: start al apretar, stop al soltar. Al parar se manda
-// por la mesh en segundo plano. Corta sola a CONFIG_SIGSEV_VOICE_MAX_S.
+// Grabacion push-to-talk en la placa: start al apretar, stop al soltar. Al parar
+// se manda por la mesh en segundo plano. Corta sola a CONFIG_SIGSEV_VOICE_MAX_S.
 esp_err_t messages_voice_start(mesh_node_id_t dest);
 esp_err_t messages_voice_stop(void);
 bool messages_voice_recording(uint32_t *elapsed_ms);
 
-// Mensajes visibles, del mas nuevo al mas viejo, solo los de id > after_id.
+// Mensajes de la placa (messages_for_board), del mas nuevo al mas viejo, solo
+// los de id > after_id.
 size_t messages_list(message_t *out, size_t max, uint32_t after_id);
+// Idem para un celu (messages_for_client).
+size_t messages_list_for(mesh_node_id_t client, message_t *out, size_t max, uint32_t after_id);
+// El celu destino de un privado lo vio: avisa al que lo mando (una sola vez).
+void messages_mark_read(uint32_t id);
 bool messages_get(uint32_t id, message_t *out);
 // Cuantos privados ajenos tenemos en custodia.
 size_t messages_transit_count(void);
@@ -98,7 +114,8 @@ size_t messages_transit_count(void);
 // Voz que llega ya grabada (ej. subida desde el celular): PCM a
 // MESSAGES_VOICE_SAMPLE_RATE, de a MESSAGES_VOICE_BLOCK_SAMPLES muestras. Al
 // terminar se manda por la mesh en segundo plano, como una grabacion. Una a la vez.
-esp_err_t messages_voice_import_begin(mesh_node_id_t dest, uint32_t samples, uint32_t *out_id);
+esp_err_t messages_voice_import_begin(mesh_node_id_t from, mesh_node_id_t dest, uint32_t samples,
+                                      uint32_t *out_id);
 esp_err_t messages_voice_import_block(uint32_t id, const int16_t *pcm);
 esp_err_t messages_voice_import_end(uint32_t id, bool ok);  // ok = false descarta
 
@@ -106,8 +123,8 @@ esp_err_t messages_voice_import_end(uint32_t id, bool ok);  // ok = false descar
 // mandan por la mesh en segundo plano. Uno a la vez. Lo que se pierde en el
 // camino se vuelve a pedir solo.
 size_t messages_file_max_bytes(void);
-esp_err_t messages_file_begin(mesh_node_id_t dest, const char *name, const char *mime, uint32_t size,
-                              uint32_t *out_id);
+esp_err_t messages_file_begin(mesh_node_id_t from, mesh_node_id_t dest, const char *name, const char *mime,
+                              uint32_t size, uint32_t *out_id);
 esp_err_t messages_file_write(uint32_t id, const void *data, size_t len);
 esp_err_t messages_file_end(uint32_t id, bool ok);  // ok = false descarta
 // Copia el pedazo `index` (hasta MESSAGES_FILE_CHUNK bytes) y su largo real.

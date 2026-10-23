@@ -42,12 +42,12 @@ typedef struct {
 static track_t s_tracks[STORE_MAX_MESSAGES];
 static uint32_t s_ids[STORE_MAX_MESSAGES];  // solo el task de repair
 
-// Voz o archivo a medio llegar que este nodo quiere completar: le interesa
-// (es visible) y no es propio.
+// Voz o archivo a medio llegar que este nodo quiere completar: le interesa a
+// la placa o a sus celus, y no salio de aca.
 static bool wants_repair(const message_t *m)
 {
-    return (m->kind == MESSAGE_VOICE || m->kind == MESSAGE_FILE) && messages_is_visible(m) &&
-           m->origin != mesh_self_id() &&
+    return (m->kind == MESSAGE_VOICE || m->kind == MESSAGE_FILE) && messages_is_local(m) &&
+           m->origin != mesh_self_id() && !presence_is_local_client(m->origin) &&
            (m->blocks_received < m->blocks || (m->kind == MESSAGE_FILE && m->file_size == 0));
 }
 
@@ -126,7 +126,7 @@ static void on_nack(const mesh_rx_meta_t *meta, const void *payload, size_t len,
     if (!store_find(w.origin, w.ref, &id) || !store_get(id, &m)) {
         return;
     }
-    const bool is_origin = w.origin == mesh_self_id();
+    const bool is_origin = w.origin == mesh_self_id() || presence_is_local_client(w.origin);
     if (!is_origin && presence_is_alive(w.origin)) {
         return;  // contesta el origen
     }
