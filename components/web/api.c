@@ -1,10 +1,13 @@
-// API JSON para la app web:
-//   GET  /api/state             nodo propio, nodos de la red, historial, estadisticas
-//   GET  /api/messages?after=N  mensajes con id > N, del mas nuevo al mas viejo
+// API JSON para la app web. Cada celu es un cliente de la placa: se identifica
+// con ?c=ID (8 hex, lo elige el celu y lo guarda) en todos los pedidos, y con
+// su nombre en el header X-Client-Name (URL-encoded). Solo ve lo suyo.
+//   GET  /api/state             placa, cliente, nodos de la red, historial, estadisticas
+//   GET  /api/messages?after=N  mensajes con id > N, del mas nuevo al mas viejo (los
+//                               privados para el cliente quedan leidos)
 //   GET  /api/voice?id=N        mensaje de voz como WAV (PCM 16 bits, 8 kHz)
 //   POST /api/alert?kind=N      manda una alerta (alert_kind_t)
 //   POST /api/text?to=ID        manda el body como texto (to = id de 8 hex: privado)
-//   POST /api/name              renombra este nodo con el body
+//   POST /api/name              renombra la placa con el body
 //   POST /api/voice?to=ID       manda el body (PCM 16 bits mono, 8 kHz) como voz
 //   POST /api/play?id=N         reproduce una voz en el parlante de la placa
 //   GET  /api/file?id=N         baja un archivo recibido
@@ -93,6 +96,46 @@ static int read_body(httpd_req_t *req, char *buf, size_t size)
     return strlen(buf);
 }
 
+// Decodifica %XX en el lugar (lo que manda encodeURIComponent).
+static void url_decode(char *s)
+{
+    char *out = s;
+    for (; *s; s++) {
+        int hi, lo;
+        if (*s == '%' && s[1] && s[2] && sscanf((char[]){s[1], s[2], 0}, "%1x%1x", &hi, &lo) == 2) {
+            *out++ = (char)(hi << 4 | lo);
+            s += 2;
+        } else {
+            *out++ = *s;
+        }
+    }
+    *out = '\0';
+}
+
+// El cliente que hace el pedido (?c=ID). Si manda su nombre, queda anotado como
+// conectado a esta placa. Falla si no hay id o es el de una placa.
+static bool client_of(httpd_req_t *req, mesh_node_id_t *out)
+{
+    long long id;
+    if (!query_num(req, "c", 16, &id) || id <= MESSAGES_TO_ALL || id > UINT32_MAX || id == mesh_self_id()) {
+        return false;
+    }
+    char name[PRESENCE_NAME_MAX * 3 + 1] = "";
+    httpd_req_get_hdr_value_str(req, "X-Client-Name", name, sizeof(name));
+    url_decode(name);
+    name[PRESENCE_NAME_MAX] = '\0';
+    if (presence_client_seen((mesh_node_id_t)id, name) != ESP_OK) {
+        return false;
+    }
+    *out = (mesh_node_id_t)id;
+    return true;
+}
+
+static esp_err_t reply_no_client(httpd_req_t *req)
+{
+    return reply_error(req, "400 Bad Request", "missing or bad client id");
+}
+
 static void json_id(json_out_t *out, mesh_node_id_t id)
 {
     json_fmt(out, "\"%08" PRIx32 "\"", id);
@@ -124,6 +167,10 @@ static void json_node(json_out_t *out, const presence_node_t *n)
 
 static esp_err_t get_state(httpd_req_t *req)
 {
+    mesh_node_id_t client;
+    if (!client_of(req, &client)) {
+        return reply_no_client(req);
+    }
     presence_node_t *nodes = malloc(sizeof(presence_node_t) * (MAX_LIST + 1));
     if (!nodes) {
         return reply_error(req, "503 Service Unavailable", "no memory");
@@ -138,7 +185,13 @@ static esp_err_t get_state(httpd_req_t *req)
 
     json_out_t out;
     json_begin(&out, req);
-    json_fmt(&out, "{\"now\":%" PRIu32 ",\"self\":", mesh_now_ms());
+    char me[PRESENCE_NAME_MAX + 1];
+    presence_name_of(client, me, sizeof(me));
+    json_fmt(&out, "{\"now\":%" PRIu32 ",\"me\":{\"id\":", mesh_now_ms());
+    json_id(&out, client);
+    json_raw(&out, ",\"name\":");
+    json_str(&out, me);
+    json_raw(&out, "},\"self\":");
     json_node(&out, &nodes[0]);
     json_raw(&out, ",\"nodes\":[");
     for (size_t i = 0; i < count; i++) {
@@ -154,7 +207,7 @@ static esp_err_t get_state(httpd_req_t *req)
     json_fmt(&out, ",\"rec\":{\"active\":%s,\"ms\":%" PRIu32 "}", recording ? "true" : "false", rec_ms);
     free(nodes);
 
-    // Historial de nodos conocidos: para elegir el destino de un privado.
+    // Historial de placas y clientes conocidos: para elegir el destino de un privado.
     presence_known_t *known = malloc(sizeof(presence_known_t) * PRESENCE_MAX_KNOWN);
     const size_t n_known = known ? presence_known(known, PRESENCE_MAX_KNOWN) : 0;
     json_raw(&out, ",\"known\":[");
@@ -163,8 +216,13 @@ static esp_err_t get_state(httpd_req_t *req)
         json_id(&out, known[i].id);
         json_raw(&out, ",\"name\":");
         json_str(&out, known[i].name);
-        json_fmt(&out, ",\"alive\":%s,\"seen\":%s,\"age\":%" PRIu32 "}", known[i].alive ? "true" : "false",
+        json_fmt(&out, ",\"alive\":%s,\"seen\":%s,\"age\":%" PRIu32, known[i].alive ? "true" : "false",
                  known[i].seen ? "true" : "false", known[i].age_ms / 1000);
+        if (known[i].kind == PRESENCE_KIND_CLIENT) {
+            json_raw(&out, ",\"client\":true,\"parent\":");
+            json_id(&out, known[i].parent);
+        }
+        json_raw(&out, "}");
     }
     free(known);
     json_fmt(&out, "],\"transit\":%u,\"voice_max_s\":%d,\"file_max\":%u,\"speaker\":%s}",
@@ -190,6 +248,10 @@ static const char *kind_name(message_kind_t kind)
 
 static esp_err_t get_messages(httpd_req_t *req)
 {
+    mesh_node_id_t client;
+    if (!client_of(req, &client)) {
+        return reply_no_client(req);
+    }
     long after = 0;
     query_int(req, "after", &after);
 
@@ -197,7 +259,7 @@ static esp_err_t get_messages(httpd_req_t *req)
     if (!msgs) {
         return reply_error(req, "503 Service Unavailable", "no memory");
     }
-    const size_t count = messages_list(msgs, MAX_LIST, after > 0 ? after : 0);
+    const size_t count = messages_list_for(client, msgs, MAX_LIST, after > 0 ? after : 0);
     const uint32_t now = mesh_now_ms();
 
     json_out_t out;
@@ -221,7 +283,8 @@ static esp_err_t get_messages(httpd_req_t *req)
             json_id(&out, m->dest);
             json_raw(&out, ",\"to_name\":");
             json_str(&out, to);
-            json_fmt(&out, ",\"delivered\":%s", m->delivered ? "true" : "false");
+            json_fmt(&out, ",\"delivered\":%s,\"read\":%s", m->delivered ? "true" : "false",
+                     m->read ? "true" : "false");
         }
         switch (m->kind) {
         case MESSAGE_ALERT:
@@ -247,8 +310,15 @@ static esp_err_t get_messages(httpd_req_t *req)
         json_raw(&out, "}");
     }
     json_raw(&out, "]}");
+    const esp_err_t err = json_end(&out);
+    // Lo que le llego entero ya lo vio: segunda tilde para quien lo mando.
+    for (size_t i = 0; i < count && err == ESP_OK; i++) {
+        if (msgs[i].dest == client && !msgs[i].read && msgs[i].blocks_received == msgs[i].blocks) {
+            messages_mark_read(msgs[i].id);
+        }
+    }
     free(msgs);
-    return json_end(&out);
+    return err;
 }
 
 #define FOURCC __attribute__((nonstring))
@@ -273,7 +343,12 @@ static esp_err_t get_voice(httpd_req_t *req)
 {
     long id;
     message_t msg;
-    if (!query_int(req, "id", &id) || !messages_get(id, &msg) || msg.kind != MESSAGE_VOICE) {
+    mesh_node_id_t client;
+    if (!client_of(req, &client)) {
+        return reply_no_client(req);
+    }
+    if (!query_int(req, "id", &id) || !messages_get(id, &msg) || msg.kind != MESSAGE_VOICE ||
+        !messages_for_client(&msg, client)) {
         return reply_error(req, "404 Not Found", "no such voice message");
     }
 
@@ -310,7 +385,12 @@ static esp_err_t get_file(httpd_req_t *req)
 {
     long id;
     message_t msg;
-    if (!query_int(req, "id", &id) || !messages_get(id, &msg) || msg.kind != MESSAGE_FILE) {
+    mesh_node_id_t client;
+    if (!client_of(req, &client)) {
+        return reply_no_client(req);
+    }
+    if (!query_int(req, "id", &id) || !messages_get(id, &msg) || msg.kind != MESSAGE_FILE ||
+        !messages_for_client(&msg, client)) {
         return reply_error(req, "404 Not Found", "no such file");
     }
     if (msg.file_size == 0 || msg.blocks_received < msg.blocks) {
@@ -351,7 +431,7 @@ static bool recv_exact(httpd_req_t *req, void *buf, size_t len)
 static bool query_dest(httpd_req_t *req, mesh_node_id_t *out)
 {
     long long to = MESSAGES_TO_ALL;
-    if (query_num(req, "to", 16, &to) && (to < 0 || to > UINT32_MAX || to == mesh_self_id())) {
+    if (query_num(req, "to", 16, &to) && (to < 0 || to > UINT32_MAX)) {
         return false;
     }
     *out = (mesh_node_id_t)to;
@@ -360,11 +440,15 @@ static bool query_dest(httpd_req_t *req, mesh_node_id_t *out)
 
 static esp_err_t post_alert(httpd_req_t *req)
 {
+    mesh_node_id_t client;
+    if (!client_of(req, &client)) {
+        return reply_no_client(req);
+    }
     long kind;
     if (!query_int(req, "kind", &kind) || kind < 0 || kind >= ALERT_COUNT) {
         return reply_error(req, "400 Bad Request", "bad alert kind");
     }
-    if (messages_send_alert(kind) != ESP_OK) {
+    if (messages_send_alert(client, kind) != ESP_OK) {
         return reply_error(req, "503 Service Unavailable", "mesh busy");
     }
     return reply_ok(req);
@@ -372,15 +456,18 @@ static esp_err_t post_alert(httpd_req_t *req)
 
 static esp_err_t post_text(httpd_req_t *req)
 {
-    mesh_node_id_t to;
-    if (!query_dest(req, &to)) {
+    mesh_node_id_t client, to;
+    if (!client_of(req, &client)) {
+        return reply_no_client(req);
+    }
+    if (!query_dest(req, &to) || to == client) {
         return reply_error(req, "400 Bad Request", "bad destination");
     }
     char text[MESSAGES_TEXT_MAX + 1];
     if (read_body(req, text, sizeof(text)) <= 0) {
         return reply_error(req, "400 Bad Request", "text must be 1-160 bytes");
     }
-    if (messages_send_text(to, text) != ESP_OK) {
+    if (messages_send_text(client, to, text) != ESP_OK) {
         return reply_error(req, "503 Service Unavailable", "mesh busy");
     }
     return reply_ok(req);
@@ -388,13 +475,16 @@ static esp_err_t post_text(httpd_req_t *req)
 
 static esp_err_t post_voice(httpd_req_t *req)
 {
-    mesh_node_id_t to;
-    if (!query_dest(req, &to)) {
+    mesh_node_id_t client, to;
+    if (!client_of(req, &client)) {
+        return reply_no_client(req);
+    }
+    if (!query_dest(req, &to) || to == client) {
         return reply_error(req, "400 Bad Request", "bad destination");
     }
     const uint32_t samples = req->content_len / sizeof(int16_t);
     uint32_t id;
-    if (samples == 0 || messages_voice_import_begin(to, samples, &id) != ESP_OK) {
+    if (samples == 0 || messages_voice_import_begin(client, to, samples, &id) != ESP_OK) {
         return reply_error(req, "503 Service Unavailable", "no room for voice");
     }
 
@@ -426,26 +516,13 @@ static esp_err_t post_voice(httpd_req_t *req)
     return reply_ok(req);
 }
 
-// Decodifica %XX en el lugar (lo que manda encodeURIComponent).
-static void url_decode(char *s)
-{
-    char *out = s;
-    for (; *s; s++) {
-        int hi, lo;
-        if (*s == '%' && s[1] && s[2] && sscanf((char[]){s[1], s[2], 0}, "%1x%1x", &hi, &lo) == 2) {
-            *out++ = (char)(hi << 4 | lo);
-            s += 2;
-        } else {
-            *out++ = *s;
-        }
-    }
-    *out = '\0';
-}
-
 static esp_err_t post_file(httpd_req_t *req)
 {
-    mesh_node_id_t to;
-    if (!query_dest(req, &to)) {
+    mesh_node_id_t client, to;
+    if (!client_of(req, &client)) {
+        return reply_no_client(req);
+    }
+    if (!query_dest(req, &to) || to == client) {
         return reply_error(req, "400 Bad Request", "bad destination");
     }
     if (req->content_len == 0 || req->content_len > messages_file_max_bytes()) {
@@ -459,7 +536,7 @@ static esp_err_t post_file(httpd_req_t *req)
     name[MESSAGES_FILE_NAME_MAX] = '\0';
 
     uint32_t id;
-    if (messages_file_begin(to, name, mime, req->content_len, &id) != ESP_OK) {
+    if (messages_file_begin(client, to, name, mime, req->content_len, &id) != ESP_OK) {
         return reply_error(req, "503 Service Unavailable", "no room for file");
     }
     static uint8_t buf[1024];  // un solo task de httpd
@@ -477,9 +554,14 @@ static esp_err_t post_file(httpd_req_t *req)
 
 static esp_err_t post_play(httpd_req_t *req)
 {
+    mesh_node_id_t client;
+    if (!client_of(req, &client)) {
+        return reply_no_client(req);
+    }
     long id;
-    if (!query_int(req, "id", &id)) {
-        return reply_error(req, "400 Bad Request", "bad id");
+    message_t msg;
+    if (!query_int(req, "id", &id) || !messages_get(id, &msg) || !messages_for_client(&msg, client)) {
+        return reply_error(req, "404 Not Found", "no such voice");
     }
     const esp_err_t err = messages_voice_play(id);
     if (err == ESP_ERR_NOT_SUPPORTED) {
