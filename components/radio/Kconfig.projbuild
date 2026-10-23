@@ -1,0 +1,16 @@
+menu "SIGSEV: radio"
+
+    config SIGSEV_RADIO_CHANNEL
+        int "WiFi channel"
+        range 1 13
+        default 6
+        help
+            Every node must use the same channel: the softAP (for phones) and
+            ESP-NOW (for the mesh) share the radio and its channel.
+
+    config SIGSEV_RADIO_MAX_CLIENTS
+        int "Max phones connected per node"
+        range 1 10
+        default 4
+
+endmenu

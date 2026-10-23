@@ -1,9 +1,18 @@
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Tick de 1 ms: el jitter de reenvio de la mesh y los delays cortos lo necesitan.
+CONFIG_FREERTOS_HZ=1000
+
+# Los navegadores de los telefonos mandan headers largos.
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_HTTPD_MAX_URI_LEN=256
 
 # Perfil por defecto: PSRAM octal de 8 MB. Usa internamente los GPIO 33-37, asi
-# que el display queda deshabilitado mientras SCL/SDA esten en 36/37
-# (ver HACK_LCD_SCL_IO / HACK_LCD_SDA_IO).
+# que el display queda deshabilitado en este perfil.
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y

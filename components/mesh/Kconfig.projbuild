@@ -1,0 +1,21 @@
+menu "SIGSEV: mesh"
+
+    config SIGSEV_MESH_TTL
+        int "Max hops per packet (TTL)"
+        range 1 15
+        default 6
+
+    config SIGSEV_MESH_FORWARD_JITTER_MS
+        int "Max random delay before forwarding (ms)"
+        range 0 50
+        default 8
+        help
+            Nodes that hear the same packet wait a random time before
+            re-broadcasting it, so their forwards don't collide on air.
+
+    config SIGSEV_MESH_NEIGHBOR_TIMEOUT_S
+        int "Seconds without hearing a neighbor before dropping it"
+        range 3 120
+        default 15
+
+endmenu
