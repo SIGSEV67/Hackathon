@@ -1,5 +1,6 @@
 #include "audio.h"
 #include "buttons.h"
+#include "call.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -42,6 +43,12 @@ static void on_hold(void *arg)
 static void on_voice_key(bool pressed)
 {
     static bool recording;
+    call_info_t call;
+    call_get(&call);
+    if (call.state == CALL_ACTIVE) {
+        call_talk(pressed);  // en llamada, KEY4 es la tecla para hablar
+        return;
+    }
     if (!pressed) {
         if (recording) {
             messages_voice_stop();
@@ -63,6 +70,27 @@ static void on_voice_key(bool pressed)
     recording = messages_voice_start(ui_selected_node()) == ESP_OK;
 }
 
+// Toque corto (soltar antes de que salte la alerta) de KEY1/KEY2: llamadas.
+// KEY1 llama al nodo marcado en Red, atiende o corta; KEY2 rechaza.
+static void on_tap(button_id_t btn)
+{
+    call_info_t call;
+    call_get(&call);
+    if (btn == BTN_KEY2 && call.state == CALL_INCOMING) {
+        call_hangup();
+    } else if (btn != BTN_KEY1) {
+        return;
+    } else if (call.state == CALL_INCOMING) {
+        messages_voice_play_stop();
+        call_answer();
+    } else if (call.state != CALL_IDLE) {
+        call_hangup();
+    } else if (ui_selected_node() != MESSAGES_TO_ALL) {
+        messages_voice_play_stop();
+        call_dial(ui_selected_node());
+    }
+}
+
 static void on_button(void *arg, esp_event_base_t base, int32_t event, void *data)
 {
     const button_id_t btn = *(const button_id_t *)data;
@@ -74,9 +102,12 @@ static void on_button(void *arg, esp_event_base_t base, int32_t event, void *dat
     }
     for (size_t i = 0; i < ALERT_KEYS; i++) {
         if (s_alert_keys[i].key == btn) {
+            const bool tap = !pressed && esp_timer_is_active(s_hold_timers[i]);
             esp_timer_stop(s_hold_timers[i]);  // no importa si no estaba corriendo
             if (pressed) {
                 esp_timer_start_once(s_hold_timers[i], ALERT_HOLD_US);
+            } else if (tap) {
+                on_tap(btn);
             }
             return;
         }

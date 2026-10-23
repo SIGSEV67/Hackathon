@@ -12,6 +12,7 @@
 #include "audio.h"
 #include "board.h"
 #include "buttons.h"
+#include "call.h"
 #include "controls.h"
 #include "link.h"
 #include "mesh.h"
@@ -58,6 +59,7 @@ void app_main(void)
     };
     ESP_ERROR_CHECK(presence_init(&presence_cfg));
     ESP_ERROR_CHECK(messages_init());
+    ESP_ERROR_CHECK(call_init());
 
     // Radio: AP para telefonos + ESP-NOW para la mesh, mismo canal.
     char name[PRESENCE_NAME_MAX + 1];
