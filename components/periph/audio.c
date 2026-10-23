@@ -158,6 +158,39 @@ esp_err_t audio_init(void)
     return ESP_OK;
 }
 
+void audio_framer_reset(audio_framer_t *f)
+{
+    f->fill = 0;
+    f->pair_sum = 0;
+    f->pair_half = false;
+}
+
+void audio_framer_push(audio_framer_t *f, const int16_t *samples, size_t count,
+                       void (*on_frame)(const int16_t *frame, size_t len, void *ctx), void *ctx)
+{
+    for (size_t i = 0; i < count; i++) {
+        // Pasa-altos de un polo: saca el offset DC del PDM.
+        const int32_t x = samples[i];
+        f->dc_q8 += ((x << 8) - f->dc_q8) >> 7;
+        const int32_t y = x - (f->dc_q8 >> 8);
+
+        // 16 kHz -> 8 kHz promediando de a pares (filtro anti-alias minimo).
+        f->pair_sum += y;
+        f->pair_half = !f->pair_half;
+        if (f->pair_half) {
+            continue;
+        }
+        int32_t v = f->pair_sum / 2;
+        f->pair_sum = 0;
+        v = v > INT16_MAX ? INT16_MAX : (v < INT16_MIN ? INT16_MIN : v);
+        f->frame[f->fill++] = (int16_t)v;
+        if (f->fill == f->len) {
+            f->fill = 0;
+            on_frame(f->frame, f->len, ctx);
+        }
+    }
+}
+
 bool audio_has_speaker(void)
 {
     return CONFIG_HACK_SPEAKER_ENABLE;

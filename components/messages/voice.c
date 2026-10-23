@@ -51,12 +51,9 @@ static struct {
     volatile uint16_t blocks;
     uint32_t start_ms;
     adpcm_state_t enc;
-    int32_t dc_q8;     // estimacion del offset DC del mic, en Q8
-    int32_t pair_sum;  // decimacion 2:1
-    bool pair_half;
+    audio_framer_t framer;
     int16_t pcm[MESSAGES_VOICE_BLOCK_SAMPLES];
-    int pcm_len;
-} s_rec;
+} s_rec = {.framer = {.frame = s_rec.pcm, .len = MESSAGES_VOICE_BLOCK_SAMPLES}};
 
 // Trabajos del task de voz: REC_DONE cierra la grabacion de la placa; otro
 // valor es el id de una voz importada que hay que mandar.
@@ -77,17 +74,19 @@ static void post_job(uint32_t job)
 
 // --- grabacion (task del mic) -------------------------------------------------
 
-static void flush_block(void)
+static void on_frame(const int16_t *pcm, size_t len, void *ctx)
 {
+    if (!s_rec.active) {
+        return;  // se corto a mitad del chunk del mic
+    }
     block_t block = {.predictor = s_rec.enc.predictor, .index = s_rec.enc.index};
-    adpcm_encode(&s_rec.enc, s_rec.pcm, MESSAGES_VOICE_BLOCK_SAMPLES, block.data);
+    adpcm_encode(&s_rec.enc, pcm, MESSAGES_VOICE_BLOCK_SAMPLES, block.data);
     if (store_block_put(s_rec.msg_id, s_rec.blocks, &block, NULL) != ESP_OK) {
         s_rec.active = false;  // el store desalojo el mensaje: no hay donde seguir
         post_job(REC_DONE);
         return;
     }
     s_rec.blocks++;
-    s_rec.pcm_len = 0;
     if (s_rec.blocks >= MAX_BLOCKS) {
         s_rec.active = false;
         post_job(REC_DONE);
@@ -99,26 +98,7 @@ static void on_mic(const int16_t *samples, size_t count, void *ctx)
     if (!s_rec.active) {
         return;
     }
-    for (size_t i = 0; i < count && s_rec.active; i++) {
-        // Pasa-altos de un polo: saca el offset DC del PDM.
-        const int32_t x = samples[i];
-        s_rec.dc_q8 += ((x << 8) - s_rec.dc_q8) >> 7;
-        const int32_t y = x - (s_rec.dc_q8 >> 8);
-
-        // 16 kHz -> 8 kHz promediando de a pares (filtro anti-alias minimo).
-        s_rec.pair_sum += y;
-        s_rec.pair_half = !s_rec.pair_half;
-        if (s_rec.pair_half) {
-            continue;
-        }
-        int32_t v = s_rec.pair_sum / 2;
-        s_rec.pair_sum = 0;
-        v = v > INT16_MAX ? INT16_MAX : (v < INT16_MIN ? INT16_MIN : v);
-        s_rec.pcm[s_rec.pcm_len++] = (int16_t)v;
-        if (s_rec.pcm_len == MESSAGES_VOICE_BLOCK_SAMPLES) {
-            flush_block();
-        }
-    }
+    audio_framer_push(&s_rec.framer, samples, count, on_frame, NULL);
 }
 
 // --- envio y cierre (task propio) ----------------------------------------------
@@ -305,9 +285,7 @@ esp_err_t messages_voice_start(mesh_node_id_t dest)
     s_rec.blocks = 0;
     s_rec.start_ms = mesh_now_ms();
     s_rec.enc = (adpcm_state_t){0};
-    s_rec.pair_sum = 0;
-    s_rec.pair_half = false;
-    s_rec.pcm_len = 0;
+    audio_framer_reset(&s_rec.framer);
     s_rec.busy = true;
     s_rec.active = true;
 

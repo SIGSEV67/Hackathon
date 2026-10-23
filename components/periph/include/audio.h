@@ -18,6 +18,23 @@ esp_err_t audio_init(void);
 // solo quiere audio a veces (ej. grabar), filtra adentro de su callback.
 esp_err_t audio_mic_add_sink(audio_mic_sink_t fn, void *ctx);
 
+// Arma frames de voz a 8 kHz con lo que da el mic: saca el offset DC del PDM,
+// baja 16 -> 8 kHz y llama a on_frame cada `len` muestras. Lo usan la grabacion
+// y las llamadas desde el callback del mic.
+typedef struct {
+    int16_t *frame;  // buffer de `len` muestras que pone el usuario
+    size_t len;
+    size_t fill;
+    int32_t dc_q8;
+    int32_t pair_sum;
+    bool pair_half;
+} audio_framer_t;
+
+// Empieza un frame nuevo (conserva la estimacion del DC).
+void audio_framer_reset(audio_framer_t *f);
+void audio_framer_push(audio_framer_t *f, const int16_t *samples, size_t count,
+                       void (*on_frame)(const int16_t *frame, size_t len, void *ctx), void *ctx);
+
 // --- parlante ---
 // Sin parlante (CONFIG_HACK_SPEAKER_ENABLE=n) todo devuelve ESP_ERR_NOT_SUPPORTED.
 // Se puede llamar desde varios tasks: las escrituras se serializan.
