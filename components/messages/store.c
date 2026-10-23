@@ -276,3 +276,51 @@ size_t store_count(bool (*keep)(const message_t *))
     UNLOCK();
     return n;
 }
+
+size_t store_ids(uint32_t *out, size_t max, bool (*keep)(const message_t *))
+{
+    size_t n = 0;
+    LOCK();
+    for (int i = 1; i <= MAX_MESSAGES && n < max; i++) {
+        const slot_t *slot = &s_slots[(s_head - i + MAX_MESSAGES) % MAX_MESSAGES];
+        if (slot->used && (!keep || keep(&slot->msg))) {
+            out[n++] = slot->msg.id;
+        }
+    }
+    UNLOCK();
+    return n;
+}
+
+size_t store_missing(uint32_t id, block_range_t *out, size_t max)
+{
+    size_t n = 0;
+    LOCK();
+    const slot_t *slot = find(id);
+    if (slot && slot->blocks) {
+        for (uint16_t i = 0; i < slot->msg.blocks && n < max; i++) {
+            if (slot->blocks[i].present) {
+                continue;
+            }
+            if (n > 0 && out[n - 1].start + out[n - 1].count == i) {
+                out[n - 1].count++;
+            } else {
+                out[n++] = (block_range_t){.start = i, .count = 1};
+            }
+        }
+    }
+    UNLOCK();
+    return n;
+}
+
+bool store_set_file_info(uint32_t id, uint32_t size, const char *name, const char *mime)
+{
+    LOCK();
+    slot_t *slot = find(id);
+    if (slot) {
+        slot->msg.file_size = size;
+        strlcpy(slot->msg.text, name, sizeof(slot->msg.text));
+        strlcpy(slot->msg.mime, mime, sizeof(slot->msg.mime));
+    }
+    UNLOCK();
+    return slot != NULL;
+}

@@ -50,7 +50,7 @@ typedef struct {
 static track_t s_tracks[STORE_MAX_MESSAGES];
 static SemaphoreHandle_t s_lock;
 static QueueHandle_t s_joined;
-static message_t s_scan[STORE_MAX_MESSAGES];  // solo el task del courier
+static uint32_t s_scan[STORE_MAX_MESSAGES];  // ids, solo el task del courier
 
 #define LOCK()   xSemaphoreTake(s_lock, portMAX_DELAY)
 #define UNLOCK() xSemaphoreGive(s_lock)
@@ -114,9 +114,23 @@ static void send_ack(const message_t *msg)
 
 static void resend(const message_t *msg)
 {
-    const esp_err_t err = msg->kind == MESSAGE_TEXT ? alerts_resend_text(msg) : voice_resend(msg);
-    ESP_LOGI(TAG, "resend %s %08" PRIx32 "/%u to %08" PRIx32 ": %s", msg->kind == MESSAGE_TEXT ? "text" : "voice",
-             msg->origin, msg->ref, msg->dest, esp_err_to_name(err));
+    static const char *const names[] = {[MESSAGE_TEXT] = "text", [MESSAGE_VOICE] = "voice", [MESSAGE_FILE] = "file"};
+    esp_err_t err = ESP_ERR_NOT_SUPPORTED;
+    switch (msg->kind) {
+    case MESSAGE_TEXT:
+        err = alerts_resend_text(msg);
+        break;
+    case MESSAGE_VOICE:
+        err = voice_resend(msg);
+        break;
+    case MESSAGE_FILE:
+        err = files_resend(msg);
+        break;
+    case MESSAGE_ALERT:
+        break;
+    }
+    ESP_LOGI(TAG, "resend %s %08" PRIx32 "/%u to %08" PRIx32 ": %s", names[msg->kind], msg->origin, msg->ref,
+             msg->dest, esp_err_to_name(err));
 }
 
 // Aparecio un nodo: agendar los privados para el y reenviarle los ACKs de los
@@ -124,9 +138,13 @@ static void resend(const message_t *msg)
 static void on_node_joined(mesh_node_id_t node)
 {
     const uint32_t now = mesh_now_ms();
-    const size_t n = store_list(s_scan, STORE_MAX_MESSAGES, 0, NULL);
+    const size_t n = store_ids(s_scan, STORE_MAX_MESSAGES, NULL);
     for (size_t i = 0; i < n; i++) {
-        const message_t *m = &s_scan[i];
+        message_t msg;
+        if (!store_get(s_scan[i], &msg)) {
+            continue;
+        }
+        const message_t *m = &msg;
         if (needs_courier(m) && m->dest == node) {
             LOCK();
             track_t *t = track_of(m->id);
@@ -144,9 +162,13 @@ static void on_node_joined(mesh_node_id_t node)
 static void tick(void)
 {
     const uint32_t now = mesh_now_ms();
-    const size_t n = store_list(s_scan, STORE_MAX_MESSAGES, 0, needs_courier);
+    const size_t n = store_ids(s_scan, STORE_MAX_MESSAGES, needs_courier);
     for (size_t i = 0; i < n; i++) {
-        const message_t *m = &s_scan[i];
+        message_t msg;
+        if (!store_get(s_scan[i], &msg)) {
+            continue;
+        }
+        const message_t *m = &msg;
         if (now - m->received_ms > MAX_AGE_MS) {
             continue;
         }

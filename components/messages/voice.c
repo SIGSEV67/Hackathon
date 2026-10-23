@@ -123,6 +123,21 @@ static void on_mic(const int16_t *samples, size_t count, void *ctx)
 
 // --- envio y cierre (task propio) ----------------------------------------------
 
+esp_err_t voice_send_block(const message_t *msg, uint16_t index, const block_t *block)
+{
+    wire_voice_t w = {
+        .origin = msg->origin,
+        .ref = msg->ref,
+        .dest = msg->dest,
+        .index = index,
+        .count = msg->blocks,
+        .predictor = block->predictor,
+        .step_index = block->index,
+    };
+    memcpy(w.data, block->data, sizeof(w.data));
+    return mesh_send(MESH_TYPE_VOICE, &w, sizeof(w), pdMS_TO_TICKS(SEND_WAIT_MS));
+}
+
 // Manda los bloques que tengamos del mensaje (un custodio puede tener huecos).
 static esp_err_t send_voice(const message_t *msg)
 {
@@ -137,17 +152,7 @@ static esp_err_t send_voice(const message_t *msg)
         if (!block.present) {
             continue;
         }
-        wire_voice_t w = {
-            .origin = msg->origin,
-            .ref = msg->ref,
-            .dest = msg->dest,
-            .index = i,
-            .count = blocks,
-            .predictor = block.predictor,
-            .step_index = block.index,
-        };
-        memcpy(w.data, block.data, sizeof(w.data));
-        if (mesh_send(MESH_TYPE_VOICE, &w, sizeof(w), pdMS_TO_TICKS(SEND_WAIT_MS)) == ESP_OK) {
+        if (voice_send_block(msg, i, &block) == ESP_OK) {
             sent++;
         } else {
             ESP_LOGW(TAG, "block %u/%u not sent", i, blocks);

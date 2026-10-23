@@ -22,11 +22,15 @@
 #define MESSAGES_VOICE_SAMPLE_RATE   8000
 #define MESSAGES_VOICE_BLOCK_SAMPLES 440  // 55 ms: un paquete de la mesh
 #define MESSAGES_TO_ALL              0
+#define MESSAGES_FILE_CHUNK          220  // bytes de archivo por paquete de la mesh
+#define MESSAGES_FILE_NAME_MAX       40
+#define MESSAGES_MIME_MAX            31
 
 typedef enum {
     MESSAGE_ALERT,
     MESSAGE_TEXT,
     MESSAGE_VOICE,
+    MESSAGE_FILE,
 } message_kind_t;
 
 typedef enum {
@@ -47,9 +51,11 @@ typedef struct {
     uint8_t hops;            // 0 = vecino directo; MESSAGE_HOPS_SELF = propio
     uint32_t received_ms;    // mesh_now_ms() local
     alert_kind_t alert;      // MESSAGE_ALERT
-    char text[MESSAGES_TEXT_MAX + 1];  // MESSAGE_TEXT
-    uint16_t blocks;   // MESSAGE_VOICE: bloques totales
+    char text[MESSAGES_TEXT_MAX + 1];  // MESSAGE_TEXT: el texto. MESSAGE_FILE: el nombre del archivo
+    uint16_t blocks;          // MESSAGE_VOICE y MESSAGE_FILE: bloques totales
     uint16_t blocks_received; //   bloques que llegaron
+    uint32_t file_size;       // MESSAGE_FILE: bytes (0 = todavia no llego la info)
+    char mime[MESSAGES_MIME_MAX + 1];  // MESSAGE_FILE
 } message_t;
 
 #define MESSAGE_HOPS_SELF 0xff
@@ -95,6 +101,17 @@ size_t messages_transit_count(void);
 esp_err_t messages_voice_import_begin(mesh_node_id_t dest, uint32_t samples, uint32_t *out_id);
 esp_err_t messages_voice_import_block(uint32_t id, const int16_t *pcm);
 esp_err_t messages_voice_import_end(uint32_t id, bool ok);  // ok = false descarta
+
+// Archivos: se suben de a pedazos (begin, write..., end) y al terminar se
+// mandan por la mesh en segundo plano. Uno a la vez. Lo que se pierde en el
+// camino se vuelve a pedir solo.
+size_t messages_file_max_bytes(void);
+esp_err_t messages_file_begin(mesh_node_id_t dest, const char *name, const char *mime, uint32_t size,
+                              uint32_t *out_id);
+esp_err_t messages_file_write(uint32_t id, const void *data, size_t len);
+esp_err_t messages_file_end(uint32_t id, bool ok);  // ok = false descarta
+// Copia el pedazo `index` (hasta MESSAGES_FILE_CHUNK bytes) y su largo real.
+esp_err_t messages_file_read(uint32_t id, uint16_t index, uint8_t *out, size_t *len);
 
 // Reproduccion en el parlante de la placa (ESP_ERR_NOT_SUPPORTED sin parlante).
 // Pedir otra voz corta la que suena. Grabar tambien la corta.

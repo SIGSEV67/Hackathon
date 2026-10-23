@@ -6,12 +6,21 @@ menu "SIGSEV: messages"
         default 20
 
     config SIGSEV_VOICE_STORE_KB
-        int "Memory for stored voice messages (KB)"
+        int "Memory for stored voice messages and files (KB)"
         default 4096 if SPIRAM
         default 96
         help
             Oldest messages are dropped when this fills up. Voice is IMA ADPCM
             at 8 kHz, about 4 KB per second.
+
+    config SIGSEV_FILE_MAX_KB
+        int "Max file size (KB)"
+        range 1 4096
+        default 1024 if SPIRAM
+        default 48
+        help
+            Must fit in the store above. Without PSRAM keep it well under it,
+            so a file does not push every voice out.
 
     config SIGSEV_VOICE_GAIN_MAX
         int "Max playback gain (x)"
