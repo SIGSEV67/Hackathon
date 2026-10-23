@@ -10,17 +10,14 @@
 #define BOARD_MIC_CLK_IO        GPIO_NUM_7
 #define BOARD_MIC_DOUT_IO       GPIO_NUM_15
 
-// La PSRAM octal usa internamente los GPIO 33-37. Con los pines originales del
-// display (SCL=36, SDA=37) son incompatibles: en ese caso los pines del LCD no se
-// definen y cualquier codigo que los use no compila. Si se recablean SCL/SDA fuera
-// de 33-37 (HACK_LCD_SCL_IO / HACK_LCD_SDA_IO), display y PSRAM conviven.
-#define BOARD_PIN_IS_PSRAM(io)  ((io) >= 33 && (io) <= 37)
-#if CONFIG_SPIRAM && (BOARD_PIN_IS_PSRAM(CONFIG_HACK_LCD_SCL_IO) || BOARD_PIN_IS_PSRAM(CONFIG_HACK_LCD_SDA_IO))
+// La PSRAM octal usa internamente los GPIO 33-37, que pisan SCL/SDA del display.
+// Con PSRAM los pines del LCD no se definen: cualquier codigo que los use no compila.
+#if CONFIG_SPIRAM
 #define BOARD_HAS_DISPLAY       0
 #else
 #define BOARD_HAS_DISPLAY       1
-#define BOARD_LCD_SCL_IO        CONFIG_HACK_LCD_SCL_IO
-#define BOARD_LCD_SDA_IO        CONFIG_HACK_LCD_SDA_IO
+#define BOARD_LCD_SCL_IO        GPIO_NUM_36
+#define BOARD_LCD_SDA_IO        GPIO_NUM_37
 #define BOARD_LCD_RST_IO        GPIO_NUM_40
 #define BOARD_LCD_DC_IO         GPIO_NUM_39
 #define BOARD_LCD_CS_IO         GPIO_NUM_38

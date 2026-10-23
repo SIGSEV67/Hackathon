@@ -982,10 +982,6 @@ CONFIG_PARTITION_TABLE_MD5=y
 # default:
 # CONFIG_HACK_SPEAKER_ENABLE is not set
 # default:
-CONFIG_HACK_LCD_SCL_IO=36
-# default:
-CONFIG_HACK_LCD_SDA_IO=37
-# default:
 # CONFIG_HACK_DISPLAY_ROTATE_180 is not set
 # end of Hackathon board demo
 

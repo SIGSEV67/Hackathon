@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 # Uso: ./flash.sh [psram|display] [puerto] [build|flash|monitor]
-#   psram    (default) PSRAM octal 8 MB, display apagado salvo que SCL/SDA esten
-#            recableados fuera de 33-37 (build, sdkconfig)
-#   display  sin PSRAM, OLED en pines originales (build_display, sdkconfig.display)
+#   psram    (default) PSRAM octal 8 MB, sin display (build, sdkconfig)
+#   display  sin PSRAM, con OLED (build_display, sdkconfig.display)
 #   puerto   default /dev/ttyACM0. Con dos placas conectadas conviene usar
 #            /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_<MAC>-if00
 #   accion   default flash. "monitor" flashea y abre el monitor serie.
 set -euo pipefail
 
 usage() {
-    sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
     echo
     echo "Placas detectadas:"
     ls -1 /dev/serial/by-id/ 2>/dev/null | sed 's|^|  /dev/serial/by-id/|' || echo "  (ninguna)"

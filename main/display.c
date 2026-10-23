@@ -18,13 +18,12 @@ static const char *TAG = "display";
 
 #if !BOARD_HAS_DISPLAY
 
-// PSRAM activa con el display en sus pines originales: todo es no-op y nunca
-// se tocan los GPIO 36/37.
+// Perfil psram: el display comparte pines con la PSRAM, todo es no-op y
+// nunca se tocan los GPIO 36/37.
 
 esp_err_t display_init(void)
 {
-    ESP_LOGW(TAG, "display disabled: SCL/SDA (%d/%d) collide with PSRAM (GPIO 33-37)", CONFIG_HACK_LCD_SCL_IO,
-             CONFIG_HACK_LCD_SDA_IO);
+    ESP_LOGW(TAG, "display disabled in this build (PSRAM uses GPIO 33-37)");
     return ESP_ERR_NOT_SUPPORTED;
 }
 
@@ -37,8 +36,8 @@ esp_err_t display_flush(void) { return ESP_ERR_NOT_SUPPORTED; }
 
 #else
 
-#if CONFIG_SPIRAM && (BOARD_PIN_IS_PSRAM(BOARD_LCD_SCL_IO) || BOARD_PIN_IS_PSRAM(BOARD_LCD_SDA_IO))
-#error "SSD1306 display pins collide with octal PSRAM (GPIO 33-37)"
+#if CONFIG_SPIRAM
+#error "SSD1306 display (GPIO 36/37) cannot be used together with octal PSRAM (GPIO 33-37)"
 #endif
 
 #define LCD_HOST        SPI2_HOST
