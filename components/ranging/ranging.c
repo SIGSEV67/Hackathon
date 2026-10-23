@@ -110,9 +110,11 @@ static void measure(const mesh_neighbor_t *n)
         p->fails = p->fails < UINT8_MAX ? p->fails + 1 : p->fails;
     }
     UNLOCK();
-    if (ok) {
-        ESP_LOGD(TAG, "%08" PRIx32 ": %.2f m (FTM)", n->id, dist_m);
-    } else {
+    // Una de cada tantas al log, para seguirlo por el monitor sin inundarlo.
+    static unsigned s_logged;
+    if (ok && s_logged++ % 8 == 0) {
+        ESP_LOGI(TAG, "%08" PRIx32 ": %.2f m (FTM)", n->id, dist_m);
+    } else if (!ok) {
         ESP_LOGD(TAG, "%08" PRIx32 ": FTM failed (status %d)", n->id, s_report.status);
     }
 }
@@ -155,6 +157,9 @@ esp_err_t ranging_init(void)
     ESP_RETURN_ON_FALSE(s_done, ESP_ERR_NO_MEM, TAG, "no mem");
     ESP_RETURN_ON_ERROR(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_FTM_REPORT, on_wifi, NULL), TAG,
                         "register failed");
+    // El driver anuncia cada sesion FTM con tres lineas de warning: cada 2,5 s
+    // tapan el monitor. Los errores de verdad siguen saliendo.
+    esp_log_level_set("wifi", ESP_LOG_ERROR);
     ESP_RETURN_ON_FALSE(xTaskCreate(ranging_task, "ranging", 3072, NULL, 2, NULL) == pdPASS, ESP_ERR_NO_MEM, TAG,
                         "task create failed");
     ESP_LOGI(TAG, "measuring neighbors with FTM");
