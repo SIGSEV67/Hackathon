@@ -22,6 +22,8 @@ const app = {
   lastId: 0,
   firstLoad: true,
   playing: null,  // id del mensaje de voz que está sonando o cargando
+  known: [],      // historial de nodos (para elegir el destino de un privado)
+  pending: new Set(),  // privados propios todavía sin confirmar
 };
 
 // --- API -----------------------------------------------------------------------
@@ -97,14 +99,29 @@ async function playVoice(m) {
   }
 }
 
+function feedMeta(m) {
+  const meta = el('div', 'meta');
+  if (!m.to) {
+    meta.textContent = `de ${m.from} · ${hopsText(m.hops)}`;
+  } else if (m.hops < 0) {
+    meta.append(`privado para ${m.to_name} · `,
+      m.delivered ? el('span', 'ok', '✓ entregado') : el('span', 'wait', 'en camino…'));
+  } else {
+    meta.textContent = `privado de ${m.from} · ${hopsText(m.hops)}`;
+  }
+  return meta;
+}
+
 function feedItem(m) {
   const li = el('li', m.kind === 'alert' ? `alert alert-${m.alert}` : m.kind);
   li.append(el('span', 'when', ago(m.age)));
 
   const body = el('div', 'body');
-  const what = el('div', 'what', describe(m));
+  const what = el('div', 'what');
+  if (m.to) what.append(el('span', 'dm', 'PRIVADO'));
+  what.append(describe(m));
   if (m.age < NEW_FOR_S && m.hops >= 0) what.append(el('span', 'new', 'NEW!'));
-  body.append(what, el('div', 'meta', `de ${m.from} · ${hopsText(m.hops)}`));
+  body.append(what, feedMeta(m));
 
   if (m.kind === 'voice') {
     const complete = m.got >= m.blocks;
@@ -135,9 +152,20 @@ async function pollMessages() {
     if (messages.length) app.lastId = Math.max(app.lastId, ...messages.map((m) => m.id));
 
     const alert = !app.firstLoad && fresh.find((m) => m.kind === 'alert' && m.hops >= 0);
+    const dm = !app.firstLoad && fresh.find((m) => m.to && m.hops >= 0);
     if (alert) {
       banner(`${ALERT_LABELS[alert.alert]} · ${alert.from} (${hopsText(alert.hops)})`, alert.alert === 3);
       if (navigator.vibrate) navigator.vibrate(alert.alert === 3 ? 200 : [300, 100, 300, 100, 300]);
+    } else if (dm) {
+      banner(`Privado de ${dm.from}: ${describe(dm)}`, true);
+      if (navigator.vibrate) navigator.vibrate([100, 60, 100]);
+    }
+
+    // Aviso cuando un privado nuestro llega a destino.
+    for (const m of messages) {
+      if (!m.to || m.hops >= 0) continue;
+      if (!m.delivered) app.pending.add(m.id);
+      else if (app.pending.delete(m.id) && !app.firstLoad) banner(`✓ Le llegó a ${m.to_name}`, true);
     }
     app.firstLoad = false;
     renderFeed();
@@ -170,15 +198,80 @@ function setupAlertButtons() {
   }
 }
 
+// --- destino de un privado ---------------------------------------------------------------
+
+const OTHER = 'otro';
+
+function knownLabel(k) {
+  const where = k.alive ? 'en la red' : k.seen ? `visto hace ${ago(k.age)}` : 'sin ver';
+  return `${k.name} · ${k.id.slice(-4).toUpperCase()} · ${where}`;
+}
+
+// Rehace las opciones solo si cambiaron, para no cerrarle el menú a quien lo
+// tiene abierto, y conserva la elección.
+function renderRecipients(state) {
+  app.known = state.known || [];
+  const select = $('#to');
+  const options = [['', 'Todos'], ...app.known.map((k) => [k.id, knownLabel(k)]), [OTHER, 'Otro ID…']];
+  const key = JSON.stringify(options);
+  if (select.dataset.key === key) return;
+  const value = select.value;
+  select.replaceChildren(...options.map(([v, label]) => {
+    const o = el('option', '', label);
+    o.value = v;
+    return o;
+  }));
+  select.dataset.key = key;
+  select.value = options.some(([v]) => v === value) ? value : '';
+}
+
+function updateComposeMode() {
+  const to = $('#to').value;
+  $('#to-id').hidden = to !== OTHER;
+  $('#compose').classList.toggle('private', to !== '');
+  $('#text').placeholder = to ? 'Mensaje privado (160)' : 'Escribí un mensaje (160)';
+}
+
+function selectRecipient(id) {
+  $('#to').value = id;
+  updateComposeMode();
+  document.querySelector('.indice button[data-tab="feed"]').click();
+  $('#text').focus();
+}
+
+// Devuelve el id de 8 hex del destino ('' = todos). A mano se acepta el id
+// completo o sus últimas cifras (las que muestra la placa), si no hay dudas.
+function resolveRecipient() {
+  const to = $('#to').value;
+  if (to !== OTHER) return to;
+  const typed = $('#to-id').value.trim().toLowerCase();
+  if (!/^[0-9a-f]{1,8}$/.test(typed)) throw new Error('el ID son hasta 8 cifras hexa');
+  if (typed.length === 8) return typed;
+  const matches = app.known.filter((k) => k.id.endsWith(typed));
+  if (matches.length === 1) return matches[0].id;
+  throw new Error(matches.length ? 'hay varios nodos con ese final, escribí más cifras' : 'no conozco ese nodo, escribí las 8 cifras');
+}
+
+function recipientName(id) {
+  const k = app.known.find((n) => n.id === id);
+  return k ? k.name : id.toUpperCase();
+}
+
 function setupForms() {
+  $('#to').addEventListener('change', updateComposeMode);
   $('#compose').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const input = $('#text');
     const text = input.value.trim();
     if (!text) return;
+    let to;
     try {
-      await post('/api/text', text);
+      to = resolveRecipient();
+    } catch (e) { banner(`Destino inválido: ${e.message}`); return; }
+    try {
+      await post(to ? `/api/text?to=${to}` : '/api/text', text);
       input.value = '';
+      if (to) banner(`Privado para ${recipientName(to)}: en camino`, true);
       pollMessages();
     } catch (e) { banner(`No se pudo enviar (${e.message})`); }
   });
@@ -311,6 +404,13 @@ function renderHero(state) {
   $('#stat-links').textContent = s.links.length;
 }
 
+function dmButton(id) {
+  const b = el('button', 'dm-btn', '✉');
+  b.title = 'Mandar privado';
+  b.onclick = () => selectRecipient(id);
+  return b;
+}
+
 function renderNodes(state) {
   const rows = [state.self, ...state.nodes].map((n, i) => {
     const li = el('li');
@@ -323,8 +423,19 @@ function renderNodes(state) {
     fill.style.background = noiseColor(n.noise);
     bar.append(fill);
     li.append(name, bar);
+    if (i > 0) li.append(dmButton(n.id));
     return li;
   });
+  // Los que conocemos pero no están: se les puede escribir igual y les llega
+  // cuando vuelvan.
+  for (const k of (state.known || []).filter((n) => !n.alive)) {
+    const li = el('li', 'off');
+    li.append(el('span', 'when', 'fuera'));
+    const name = el('span', 'name', `${k.name} `);
+    name.append(el('small', '', k.seen ? `· visto hace ${ago(k.age)}` : '· del historial'));
+    li.append(name, dmButton(k.id));
+    rows.push(li);
+  }
   $('#nodes').replaceChildren(...rows);
 }
 
@@ -337,6 +448,7 @@ function renderSelf(state) {
   const st = state.stats;
   $('#traffic').replaceChildren(...[
     ['recibidos', st.rx], ['enviados', st.tx], ['reenviados', st.fwd], ['duplicados', st.dup], ['perdidos', st.dropped],
+    ['en custodia', state.transit || 0],
   ].map(([label, num]) => {
     const li = el('li');
     li.append(el('span', 'num', String(num)), el('span', 'label', label));
@@ -350,6 +462,7 @@ async function pollState() {
     renderHero(state);
     renderNodes(state);
     renderSelf(state);
+    renderRecipients(state);
     updateMap(state);
   } catch (e) {
     $('#hero-net').textContent = 'sin conexión con el nodo…';

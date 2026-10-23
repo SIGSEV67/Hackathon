@@ -59,9 +59,19 @@
       <button class="alert-btn safe" data-kind="3"><span>Estoy bien</span><i></i></button>
     </div>
 
-    <form class="compose" id="compose">
-      <input id="text" maxlength="160" autocomplete="off" placeholder="Escribí un mensaje (160)">
-      <button type="submit" class="btn">Enviar</button>
+    <h2>Escribir</h2>
+    <p class="nota">A todos o a un nodo en privado. Si el nodo no está en la red, el mensaje espera en los
+      nodos que lo escucharon y le llega cuando aparezca.</p>
+    <form class="compose stack" id="compose">
+      <div class="para">
+        <label for="to">Para</label>
+        <select id="to"><option value="">Todos</option></select>
+        <input id="to-id" maxlength="8" autocomplete="off" spellcheck="false" placeholder="ID (ej. 360150D8)" hidden>
+      </div>
+      <div class="row">
+        <input id="text" maxlength="160" autocomplete="off" placeholder="Escribí un mensaje (160)">
+        <button type="submit" class="btn">Enviar</button>
+      </div>
     </form>
 
     <h2>Mensajes</h2>
@@ -95,12 +105,15 @@
     <ol class="pasos">
       <li><span><b>Conectate al WiFi de un nodo</b>Cada placa abre una red <code>SIGSEV-…</code>. No hace
         falta internet, datos ni instalar nada.</span></li>
-      <li><span><b>Mandá una alerta o una voz</b>Desde acá o desde los botones de la placa. En la placa,
+      <li><span><b>Mandá una alerta, un texto o una voz</b>Desde acá o desde los botones de la placa. En la placa,
         la tecla apartada graba voz mientras la mantenés.</span></li>
       <li><span><b>La red la reparte</b>Cada nodo reenvía una vez lo que escucha. Si uno se cae, el
         mensaje sigue por los demás.</span></li>
       <li><span><b>Llega a todos</b>Se ve en las pantallas de las placas y en cualquier celular conectado
         a cualquier nodo.</span></li>
+      <li><span><b>O a uno solo</b>Un privado va dirigido a un nodo. Si no está, los demás lo guardan y se lo
+        pasan cuando aparece, saltando de nodo en nodo; cuando llega, vuelve un ✓. En la placa: en la pantalla
+        Red marcá un nodo y mantené la tecla de voz. Ojo: es dirigido, no cifrado.</span></li>
     </ol>
   </section>
 

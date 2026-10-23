@@ -24,7 +24,7 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
 body { font: 15px/1.6 var(--mono); -webkit-text-size-adjust: 100%; }
-button, input { font: inherit; color: inherit; }
+button, input, select { font: inherit; color: inherit; }
 code { color: var(--bright); }
 .page { max-width: 640px; margin: 0 auto; padding: 16px 16px calc(28px + env(safe-area-inset-bottom)); }
 
@@ -52,7 +52,7 @@ h1 { margin: 0 0 14px; font: 700 40px/1.1 var(--display); letter-spacing: 2px; c
 .stats li { background: var(--bg); padding: 12px 6px; text-align: center; }
 .stats .num { display: block; font: 700 26px/1.2 var(--display); color: var(--bright); }
 .stats .label { display: block; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1.5px; }
-.stats.small { grid-template-columns: repeat(5, 1fr); margin: 0; }
+.stats.small { grid-template-columns: repeat(3, 1fr); margin: 0; }
 .stats.small .num { font-size: 18px; }
 
 /* --- Índice / pestañas --- */
@@ -99,7 +99,16 @@ h2 { margin: 30px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--li
 .compose { display: flex; gap: 8px; margin-top: 14px; }
 .compose input { flex: 1; min-width: 0; padding: 10px; background: var(--bg2); border: 1px solid var(--line); }
 .compose input::placeholder { color: var(--muted); }
-.compose input:focus { outline: 1px solid var(--bright); outline-offset: -1px; }
+.compose input:focus, .compose select:focus { outline: 1px solid var(--bright); outline-offset: -1px; }
+.compose.stack { flex-direction: column; }
+.compose .row { display: flex; gap: 8px; }
+.compose .para { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.compose .para label { flex: 0 0 auto; color: var(--gold); font-weight: 700; font-size: 13px; letter-spacing: 1px;
+                       text-transform: uppercase; }
+.compose select { flex: 1; min-width: 0; padding: 9px 8px; background: var(--bg2); border: 1px solid var(--line);
+                  border-radius: 0; }
+.compose #to-id { flex: 1 1 100%; text-transform: uppercase; }
+.compose.private .row input { border-color: var(--gold); }
 
 /* --- Feed (filas como el cronograma del sitio) --- */
 .feed, .rows { list-style: none; margin: 0; padding: 0; }
@@ -114,6 +123,13 @@ h2 { margin: 30px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--li
 .feed .alert-1 .what { color: var(--bright); }
 .feed .alert-3 .what, .feed .alert-3 .what::before { color: var(--green); }
 .feed .meta { font-size: 12px; color: var(--muted); }
+.feed .dm { display: inline-block; margin-right: 6px; padding: 0 5px; border: 1px solid var(--gold); color: var(--bright);
+            font: 700 10px/1.5 var(--display); letter-spacing: 1px; vertical-align: 1px; }
+.feed .ok { color: var(--green); }
+.feed .wait { color: var(--bright); }
+.rows .dm-btn { flex: 0 0 auto; align-self: center; padding: 2px 8px; background: none; border: 1px solid var(--gold);
+                color: var(--bright); cursor: pointer; font-size: 12px; }
+.rows .off { opacity: .6; }
 .feed .play { margin-top: 6px; padding: 4px 10px; background: none; border: 1px solid var(--gold); color: var(--bright);
               cursor: pointer; font-size: 13px; }
 .feed .play:disabled { border-style: dashed; border-color: var(--line); color: var(--muted); cursor: default; }
@@ -150,7 +166,6 @@ h2 { margin: 30px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--li
   .hero { grid-template-columns: 1fr; }
   .hero-art { display: none; }
   h1 { font-size: 34px; }
-  .stats.small { grid-template-columns: repeat(3, 1fr); }
 }
 
 @media (prefers-reduced-motion: reduce) {
