@@ -20,6 +20,7 @@
 #include "noise.h"
 #include "presence.h"
 #include "radio.h"
+#include "ranging.h"
 #include "ui.h"
 #include "web.h"
 
@@ -39,6 +40,18 @@ static void init_nvs(void)
     ESP_ERROR_CHECK(err);
 }
 
+// Adaptador entre ranging y presence, para que no dependan uno del otro.
+static bool link_distance(mesh_node_id_t id, uint16_t *dist_dm, bool *ftm)
+{
+    ranging_t r;
+    if (!ranging_get(id, &r)) {
+        return false;
+    }
+    *dist_dm = r.dist_dm;
+    *ftm = r.method == RANGING_FTM;
+    return true;
+}
+
 void app_main(void)
 {
     init_nvs();
@@ -56,6 +69,7 @@ void app_main(void)
         .flags = (BOARD_HAS_DISPLAY ? PRESENCE_FLAG_DISPLAY : 0) | (CONFIG_SPIRAM ? PRESENCE_FLAG_PSRAM : 0),
         .noise_level = noise_level,
         .noise_take_peak = noise_take_peak,
+        .link_distance = link_distance,
     };
     ESP_ERROR_CHECK(presence_init(&presence_cfg));
     ESP_ERROR_CHECK(messages_init());
@@ -66,6 +80,7 @@ void app_main(void)
     presence_self_name(name, sizeof(name));
     ESP_ERROR_CHECK(radio_init(name));
     ESP_ERROR_CHECK(mesh_start());
+    ESP_ERROR_CHECK(ranging_init());
 
     // Interfaces
     ESP_ERROR_CHECK(web_init());

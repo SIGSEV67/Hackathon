@@ -23,6 +23,8 @@ typedef enum {
 typedef struct {
     mesh_node_id_t id;
     int8_t rssi;
+    uint16_t dist_dm;  // distancia estimada en decimetros (0 = no se sabe)
+    bool dist_ftm;     // medida por tiempo de vuelo (si no, estimada por RSSI)
 } presence_link_t;
 
 typedef struct {
@@ -44,6 +46,8 @@ typedef struct {
     uint8_t flags;
     uint8_t (*noise_level)(void);      // opcional
     uint8_t (*noise_take_peak)(void);  // opcional
+    // Distancia a un vecino directo (opcional): false si no se sabe.
+    bool (*link_distance)(mesh_node_id_t id, uint16_t *dist_dm, bool *ftm);
 } presence_config_t;
 
 // event_data: mesh_node_id_t del nodo. NODE_JOINED sale cuando un nodo aparece

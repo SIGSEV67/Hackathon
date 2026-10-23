@@ -25,7 +25,11 @@ ESP_EVENT_DEFINE_BASE(PRESENCE_EVENT);
 typedef struct __attribute__((packed)) {
     uint32_t id;
     int8_t rssi;
+    uint16_t dist_dm;
+    uint8_t flags;  // bit 0: distancia por FTM
 } wire_link_t;
+
+#define LINK_FLAG_FTM 1
 
 typedef struct __attribute__((packed)) {
     char name[PRESENCE_NAME_MAX];  // sin terminador si ocupa los 20
@@ -124,7 +128,12 @@ static void fill_links(presence_node_t *node)
     mesh_neighbor_t neighbors[PRESENCE_MAX_LINKS];
     node->n_links = mesh_neighbors(neighbors, PRESENCE_MAX_LINKS);
     for (int i = 0; i < node->n_links; i++) {
-        node->links[i] = (presence_link_t){.id = neighbors[i].id, .rssi = neighbors[i].rssi};
+        presence_link_t *l = &node->links[i];
+        *l = (presence_link_t){.id = neighbors[i].id, .rssi = neighbors[i].rssi};
+        if (s_cfg.link_distance && !s_cfg.link_distance(l->id, &l->dist_dm, &l->dist_ftm)) {
+            l->dist_dm = 0;
+            l->dist_ftm = false;
+        }
     }
 }
 
@@ -161,7 +170,9 @@ static void beacon_task(void *arg)
         };
         strncpy(b.name, self.name, sizeof(b.name));
         for (int i = 0; i < self.n_links; i++) {
-            b.links[i] = (wire_link_t){.id = self.links[i].id, .rssi = self.links[i].rssi};
+            const presence_link_t *l = &self.links[i];
+            b.links[i] = (wire_link_t){
+                .id = l->id, .rssi = l->rssi, .dist_dm = l->dist_dm, .flags = l->dist_ftm ? LINK_FLAG_FTM : 0};
         }
         // Solo se mandan los links usados: el beacon es de largo variable.
         const size_t len = offsetof(wire_beacon_t, links) + self.n_links * sizeof(wire_link_t);
@@ -228,7 +239,12 @@ static void on_beacon(const mesh_rx_meta_t *meta, const void *payload, size_t le
     n->uptime_s = b.uptime_s;
     n->n_links = n_links;
     for (int i = 0; i < n_links; i++) {
-        n->links[i] = (presence_link_t){.id = b.links[i].id, .rssi = b.links[i].rssi};
+        n->links[i] = (presence_link_t){
+            .id = b.links[i].id,
+            .rssi = b.links[i].rssi,
+            .dist_dm = b.links[i].dist_dm,
+            .dist_ftm = b.links[i].flags & LINK_FLAG_FTM,
+        };
     }
     e->last_seen_ms = now;
     e->seen = true;
