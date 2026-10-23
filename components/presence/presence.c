@@ -17,10 +17,12 @@ ESP_EVENT_DEFINE_BASE(PRESENCE_EVENT);
 #define BEACON_PERIOD_MS  3000
 #define BEACON_JITTER_MS  500
 #define NODE_TIMEOUT_MS   (4 * BEACON_PERIOD_MS)
+#define LOCAL_CLIENT_MS   30000  // la web consulta cada ~2 s; con la pantalla apagada deja de hacerlo
+#define MAX_CLIENTS_WIRE  8
 #define MAX_NODES         PRESENCE_MAX_KNOWN
 #define NVS_NAMESPACE     "presence"
 #define NVS_KEY_NAME      "name"
-#define NVS_KEY_KNOWN     "known"
+#define NVS_KEY_KNOWN     "known2"  // "known" era el formato sin clientes
 
 typedef struct __attribute__((packed)) {
     uint32_t id;
@@ -43,15 +45,32 @@ typedef struct __attribute__((packed)) {
 
 _Static_assert(sizeof(wire_beacon_t) <= MESH_PAYLOAD_MAX, "beacon does not fit in a mesh packet");
 
-typedef struct {
-    presence_node_t node;
-    uint32_t last_seen_ms;
-    bool seen;  // recibimos un beacon en este arranque (si no, viene del historial en NVS)
-} entry_t;
-
-// Lo que se guarda del historial: quien es y como se llama.
+// Clientes de una placa: va aparte del beacon porque no entra en el mismo paquete.
 typedef struct __attribute__((packed)) {
     uint32_t id;
+    char name[PRESENCE_NAME_MAX];
+} wire_client_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t n_clients;
+    wire_client_t clients[MAX_CLIENTS_WIRE];
+} wire_clients_t;
+
+_Static_assert(sizeof(wire_clients_t) <= MESH_PAYLOAD_MAX, "client list does not fit in a mesh packet");
+
+typedef struct {
+    presence_node_t node;  // de un cliente solo se usan id y name
+    presence_kind_t kind;
+    mesh_node_id_t parent;
+    uint32_t last_seen_ms;
+    bool seen;  // lo escuchamos en este arranque (si no, viene del historial en NVS)
+} entry_t;
+
+// Lo que se guarda del historial: quien es, que es y como se llama.
+typedef struct __attribute__((packed)) {
+    uint32_t id;
+    uint8_t kind;
+    uint32_t parent;
     char name[PRESENCE_NAME_MAX];
 } known_record_t;
 
@@ -75,9 +94,14 @@ static void load_name(void)
     }
 }
 
+static bool is_local(const entry_t *e)
+{
+    return e->kind == PRESENCE_KIND_CLIENT && e->parent == mesh_self_id();
+}
+
 static bool is_alive(const entry_t *e, uint32_t now)
 {
-    return e->seen && now - e->last_seen_ms < NODE_TIMEOUT_MS;
+    return e->seen && now - e->last_seen_ms < (is_local(e) ? LOCAL_CLIENT_MS : NODE_TIMEOUT_MS);
 }
 
 // Historial de nodos conocidos en NVS, para poder escribirles aunque esten
@@ -95,6 +119,8 @@ static void load_known(void)
         for (int i = 0; i < s_count; i++) {
             memset(&s_nodes[i], 0, sizeof(s_nodes[i]));
             s_nodes[i].node.id = records[i].id;
+            s_nodes[i].kind = records[i].kind;
+            s_nodes[i].parent = records[i].parent;
             memcpy(s_nodes[i].node.name, records[i].name, PRESENCE_NAME_MAX);
             s_nodes[i].node.name[PRESENCE_NAME_MAX] = '\0';
         }
@@ -109,6 +135,8 @@ static void save_known(void)
     const int count = s_count;
     for (int i = 0; i < count; i++) {
         records[i].id = s_nodes[i].node.id;
+        records[i].kind = s_nodes[i].kind;
+        records[i].parent = s_nodes[i].parent;
         memcpy(records[i].name, s_nodes[i].node.name, PRESENCE_NAME_MAX);
     }
     xSemaphoreGive(s_lock);
@@ -153,6 +181,24 @@ static void build_self(presence_node_t *out, bool take_peak)
     fill_links(out);
 }
 
+static void send_clients(void)
+{
+    wire_clients_t w = {0};
+    const uint32_t now = mesh_now_ms();
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < s_count && w.n_clients < MAX_CLIENTS_WIRE; i++) {
+        if (is_local(&s_nodes[i]) && is_alive(&s_nodes[i], now)) {
+            wire_client_t *c = &w.clients[w.n_clients++];
+            c->id = s_nodes[i].node.id;
+            strncpy(c->name, s_nodes[i].node.name, sizeof(c->name));
+        }
+    }
+    xSemaphoreGive(s_lock);
+    if (w.n_clients) {
+        mesh_send(MESH_TYPE_CLIENTS, &w, offsetof(wire_clients_t, clients) + w.n_clients * sizeof(wire_client_t), 0);
+    }
+}
+
 static void beacon_task(void *arg)
 {
     while (1) {
@@ -177,8 +223,11 @@ static void beacon_task(void *arg)
         // Solo se mandan los links usados: el beacon es de largo variable.
         const size_t len = offsetof(wire_beacon_t, links) + self.n_links * sizeof(wire_link_t);
         mesh_send(MESH_TYPE_PRESENCE, &b, len, 0);
+        send_clients();
     }
 }
+
+static void announce_joined(mesh_node_id_t id, const char *name, const char *what);
 
 static entry_t *find_or_add(mesh_node_id_t id, bool *added)
 {
@@ -228,6 +277,7 @@ static void on_beacon(const mesh_rx_meta_t *meta, const void *payload, size_t le
     const bool was_alive = !added && is_alive(e, now);
     const bool renamed = added || strncmp(n->name, b.name, PRESENCE_NAME_MAX) != 0;
     n->id = meta->origin;
+    e->kind = PRESENCE_KIND_NODE;
     memcpy(n->name, b.name, PRESENCE_NAME_MAX);
     n->name[PRESENCE_NAME_MAX] = '\0';
     char name[PRESENCE_NAME_MAX + 1];
@@ -254,10 +304,105 @@ static void on_beacon(const mesh_rx_meta_t *meta, const void *payload, size_t le
         save_known();
     }
     if (!was_alive) {
-        ESP_LOGI(TAG, "node %s joined (%u hops)", name, meta->hops);
-        mesh_node_id_t id = meta->origin;
-        esp_event_post(PRESENCE_EVENT, PRESENCE_EVENT_NODE_JOINED, &id, sizeof(id), 0);
+        announce_joined(meta->origin, name, meta->hops ? "node (multi-hop)" : "node");
     }
+}
+
+// Con el lock tomado. Registra que el cliente esta colgado de `parent` y dice
+// si hay que avisarlo como recien llegado (nuevo, vuelve o cambio de placa).
+static bool client_heard(mesh_node_id_t id, const char *name, mesh_node_id_t parent, uint32_t now, bool *renamed)
+{
+    bool added;
+    entry_t *e = find_or_add(id, &added);
+    const bool joined = added || !is_alive(e, now) || e->parent != parent;
+    *renamed = added || strncmp(e->node.name, name, PRESENCE_NAME_MAX) != 0 || e->parent != parent;
+    e->node.id = id;
+    e->kind = PRESENCE_KIND_CLIENT;
+    e->parent = parent;
+    strlcpy(e->node.name, name, sizeof(e->node.name));
+    e->last_seen_ms = now;
+    e->seen = true;
+    return joined;
+}
+
+static void announce_joined(mesh_node_id_t id, const char *name, const char *what)
+{
+    ESP_LOGI(TAG, "%s %s joined", what, name);
+    esp_event_post(PRESENCE_EVENT, PRESENCE_EVENT_NODE_JOINED, &id, sizeof(id), 0);
+}
+
+static void on_clients(const mesh_rx_meta_t *meta, const void *payload, size_t len, void *ctx)
+{
+    wire_clients_t w;
+    if (len < offsetof(wire_clients_t, clients) || len > sizeof(w)) {
+        return;
+    }
+    memcpy(&w, payload, len);
+    if (w.n_clients > MAX_CLIENTS_WIRE || len < offsetof(wire_clients_t, clients) + w.n_clients * sizeof(wire_client_t)) {
+        return;
+    }
+    const uint32_t now = mesh_now_ms();
+    bool save = false;
+    for (int i = 0; i < w.n_clients; i++) {
+        char name[PRESENCE_NAME_MAX + 1];
+        memcpy(name, w.clients[i].name, PRESENCE_NAME_MAX);
+        name[PRESENCE_NAME_MAX] = '\0';
+        const mesh_node_id_t id = w.clients[i].id;
+        if (id == 0 || id == mesh_self_id()) {
+            continue;
+        }
+        bool renamed;
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        const bool joined = client_heard(id, name, meta->origin, now, &renamed);
+        xSemaphoreGive(s_lock);
+        save |= renamed;
+        if (joined) {
+            announce_joined(id, name, "client");
+        }
+    }
+    if (save) {
+        save_known();
+    }
+}
+
+esp_err_t presence_client_seen(mesh_node_id_t id, const char *name)
+{
+    ESP_RETURN_ON_FALSE(id && id != mesh_self_id(), ESP_ERR_INVALID_ARG, TAG, "bad client id");
+    char clean[PRESENCE_NAME_MAX + 1];
+    strlcpy(clean, name && name[0] ? name : "celu", sizeof(clean));
+    const uint32_t now = mesh_now_ms();
+    bool is_node = false, joined = false, renamed = false;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < s_count && !is_node; i++) {
+        is_node = s_nodes[i].node.id == id && s_nodes[i].kind == PRESENCE_KIND_NODE && s_nodes[i].seen;
+    }
+    if (!is_node) {
+        joined = client_heard(id, clean, mesh_self_id(), now, &renamed);
+    }
+    xSemaphoreGive(s_lock);
+    ESP_RETURN_ON_FALSE(!is_node, ESP_ERR_INVALID_ARG, TAG, "id %08" PRIx32 " is a node", id);
+    if (renamed) {
+        save_known();
+    }
+    if (joined) {
+        announce_joined(id, clean, "local client");
+    }
+    return ESP_OK;
+}
+
+bool presence_is_local_client(mesh_node_id_t id)
+{
+    const uint32_t now = mesh_now_ms();
+    bool local = false;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < s_count; i++) {
+        if (s_nodes[i].node.id == id) {
+            local = is_local(&s_nodes[i]) && is_alive(&s_nodes[i], now);
+            break;
+        }
+    }
+    xSemaphoreGive(s_lock);
+    return local;
 }
 
 esp_err_t presence_init(const presence_config_t *cfg)
@@ -268,6 +413,7 @@ esp_err_t presence_init(const presence_config_t *cfg)
     load_name();
     load_known();
     ESP_RETURN_ON_ERROR(mesh_register_handler(MESH_TYPE_PRESENCE, on_beacon, NULL), TAG, "register failed");
+    ESP_RETURN_ON_ERROR(mesh_register_handler(MESH_TYPE_CLIENTS, on_clients, NULL), TAG, "register failed");
     ESP_RETURN_ON_FALSE(xTaskCreate(beacon_task, "presence", 3072, NULL, 4, NULL) == pdPASS, ESP_ERR_NO_MEM, TAG,
                         "task create failed");
     ESP_LOGI(TAG, "announcing as \"%s\"", s_name);
@@ -330,7 +476,7 @@ size_t presence_nodes(presence_node_t *out, size_t max)
     size_t n = 0;
     xSemaphoreTake(s_lock, portMAX_DELAY);
     for (int i = 0; i < s_count && n < max; i++) {
-        if (is_alive(&s_nodes[i], now)) {
+        if (s_nodes[i].kind == PRESENCE_KIND_NODE && is_alive(&s_nodes[i], now)) {
             out[n] = s_nodes[i].node;
             out[n].age_ms = now - s_nodes[i].last_seen_ms;
             n++;
@@ -349,6 +495,8 @@ size_t presence_known(presence_known_t *out, size_t max)
         const entry_t *e = &s_nodes[i];
         out[n] = (presence_known_t){
             .id = e->node.id,
+            .kind = e->kind,
+            .parent = e->parent,
             .alive = is_alive(e, now),
             .seen = e->seen,
             .age_ms = e->seen ? now - e->last_seen_ms : 0,

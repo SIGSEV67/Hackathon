@@ -8,12 +8,22 @@
 #include "esp_event.h"
 #include "mesh.h"
 
-// Quien esta en la red. Cada nodo manda un beacon periodico (por toda la mesh)
-// con su nombre, capacidades, nivel de ruido y vecinos directos; con eso cada
-// nodo arma el directorio y la topologia completa (el "mapa de ruido").
+// Quien esta en la red. Cada nodo (placa) manda un beacon periodico (por toda
+// la mesh) con su nombre, capacidades, nivel de ruido y vecinos directos; con
+// eso cada nodo arma el directorio y la topologia completa (el "mapa de ruido").
+//
+// Ademas de las placas hay clientes: celulares (o compus) conectados al WiFi de
+// una placa, que es su "padre". Cada placa anuncia sus clientes, asi toda la red
+// sabe donde esta cada uno. Placas y clientes comparten el espacio de ids
+// (mesh_node_id_t): a los dos se les puede mandar un mensaje.
 
 #define PRESENCE_NAME_MAX  20
 #define PRESENCE_MAX_LINKS 12
+
+typedef enum {
+    PRESENCE_KIND_NODE,    // una placa
+    PRESENCE_KIND_CLIENT,  // un celu colgado de una placa
+} presence_kind_t;
 
 typedef enum {
     PRESENCE_FLAG_DISPLAY = 1 << 0,
@@ -50,8 +60,9 @@ typedef struct {
     bool (*link_distance)(mesh_node_id_t id, uint16_t *dist_dm, bool *ftm);
 } presence_config_t;
 
-// event_data: mesh_node_id_t del nodo. NODE_JOINED sale cuando un nodo aparece
-// (nuevo, de vuelta despues de caerse, o del historial por primera vez).
+// event_data: mesh_node_id_t. NODE_JOINED sale cuando una placa o un cliente
+// aparece (nuevo, de vuelta despues de caerse, del historial por primera vez, o
+// un cliente que se paso a otra placa).
 ESP_EVENT_DECLARE_BASE(PRESENCE_EVENT);
 typedef enum {
     PRESENCE_EVENT_NODE_JOINED,
@@ -72,20 +83,29 @@ void presence_name_of(mesh_node_id_t id, char *out, size_t len);
 // Snapshot del nodo propio (como lo anunciaria el proximo beacon).
 void presence_self(presence_node_t *out);
 
-// Nodos remotos vivos. Devuelve cuantos copio.
+// Placas remotas vivas (sin clientes). Devuelve cuantas copio.
 size_t presence_nodes(presence_node_t *out, size_t max);
 
-// Historial: todos los nodos que conocemos (vivos o no), con su ultimo nombre.
-// Se guarda en NVS, asi que sobrevive a un reinicio.
+// Un cliente le hablo a esta placa (la web lo llama en cada pedido): queda
+// colgado de ella. ESP_ERR_INVALID_ARG si el id es de una placa.
+esp_err_t presence_client_seen(mesh_node_id_t id, const char *name);
+
+// Si el cliente esta conectado a esta placa ahora.
+bool presence_is_local_client(mesh_node_id_t id);
+
+// Historial: todas las placas y clientes que conocemos (vivos o no), con su
+// ultimo nombre. Se guarda en NVS, asi que sobrevive a un reinicio.
 typedef struct {
     mesh_node_id_t id;
+    presence_kind_t kind;
+    mesh_node_id_t parent;  // cliente: placa de la que cuelga (o colgaba)
     char name[PRESENCE_NAME_MAX + 1];
     bool alive;      // escuchamos su beacon hace poco
     bool seen;       // lo escuchamos en este arranque (si no, solo esta en el historial)
     uint32_t age_ms; // hace cuanto (si seen)
 } presence_known_t;
 
-#define PRESENCE_MAX_KNOWN 32
+#define PRESENCE_MAX_KNOWN 48
 
 size_t presence_known(presence_known_t *out, size_t max);
 
