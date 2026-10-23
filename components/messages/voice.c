@@ -234,6 +234,7 @@ esp_err_t messages_voice_start(void)
     s_rec.busy = true;
     s_rec.active = true;
 
+    ESP_LOGI(TAG, "recording...");
     messages_notify(MESSAGES_EVENT_REC_STARTED, id);
     return ESP_OK;
 }
@@ -244,6 +245,7 @@ esp_err_t messages_voice_stop(void)
         return ESP_ERR_INVALID_STATE;  // ya corto solo por largo maximo
     }
     s_rec.active = false;
+    ESP_LOGI(TAG, "recording stopped after %" PRIu32 " ms", mesh_now_ms() - s_rec.start_ms);
     xTaskNotifyGive(s_task);
     return ESP_OK;
 }

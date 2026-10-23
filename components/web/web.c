@@ -70,6 +70,10 @@ esp_err_t web_init(void)
     snprintf(s_portal_url, sizeof(s_portal_url), "http://" IPSTR "/", IP2STR(&ip.ip));
     announce_portal_via_dhcp(ap);
 
+    // Cada chequeo de conectividad del telefono (/generate_204, etc.) cae en el
+    // 404 que redirige al portal: no es un error, no llenar el log con warnings.
+    esp_log_level_set("httpd_uri", ESP_LOG_ERROR);
+
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.max_uri_handlers = 16;
     cfg.stack_size = 6144;

@@ -3,6 +3,7 @@
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_memory_utils.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -187,11 +188,16 @@ esp_err_t store_voice_truncate(uint32_t id, uint16_t blocks)
     esp_err_t err = ESP_OK;
     LOCK();
     slot_t *slot = find(id);
-    if (!slot || !slot->blocks || blocks > slot->msg.voice_blocks) {
+    if (!slot || !slot->blocks || blocks == 0 || blocks > slot->msg.voice_blocks) {
         err = ESP_ERR_INVALID_ARG;
     } else {
-        // La memoria sobrante no se devuelve (realloc en PSRAM no vale la pena),
-        // pero se descuenta del presupuesto con el largo nuevo.
+        // Se devuelve lo que sobro: una grabacion reserva el largo maximo y sin
+        // PSRAM no entra otra hasta liberarlo.
+        const uint32_t caps = esp_ptr_external_ram(slot->blocks) ? MALLOC_CAP_SPIRAM : MALLOC_CAP_DEFAULT;
+        voice_block_t *shrunk = heap_caps_realloc(slot->blocks, blocks * sizeof(voice_block_t), caps);
+        if (shrunk) {
+            slot->blocks = shrunk;
+        }
         s_voice_used -= (slot->msg.voice_blocks - blocks) * sizeof(voice_block_t);
         slot->msg.voice_blocks = blocks;
         if (slot->msg.voice_received > blocks) {

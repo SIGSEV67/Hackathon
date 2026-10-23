@@ -4,6 +4,7 @@
 // componentes (components/) y el mapeo de botones en controls.c.
 
 #include "esp_event.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
@@ -72,4 +73,7 @@ void app_main(void)
     ESP_ERROR_CHECK(controls_init());
 
     ESP_LOGI(TAG, "%s up: connect to WiFi \"%s\" for the portal", name, name);
+    ESP_LOGI(TAG, "internal RAM free %u KB, largest block %u KB",
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+             (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024));
 }
