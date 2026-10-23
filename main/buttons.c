@@ -16,7 +16,6 @@ static const char *TAG = "buttons";
 #define DEBOUNCE_MS     20
 #define EVENT_QUEUE_LEN 16
 
-// Esto esta mal, ver los comentarios en board.h
 // btw chequeen: https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/gpio.html
 static const struct {
     gpio_num_t gpio;
@@ -38,9 +37,38 @@ static QueueHandle_t s_event_queue;
 
 static volatile uint32_t s_state;
 
+#define JOY_MASK ((1u << BTN_UP) | (1u << BTN_DOWN) | (1u << BTN_LEFT) | (1u << BTN_RIGHT))
+
+// El joystick esta rotado 45 grados: cada contacto queda en una diagonal fisica.
+// Direccion fisica (x a la derecha, y hacia arriba) de cada contacto, medida
+// empujando el stick: UP fisico cierra RIGHT y DOWN.
+static const struct {
+    int8_t x, y;
+} s_joy_dir[] = {
+    [BTN_UP] = {-1, -1},
+    [BTN_DOWN] = {+1, +1},
+    [BTN_LEFT] = {+1, -1},
+    [BTN_RIGHT] = {-1, +1},
+};
+
 static inline bool level_is_pressed(button_id_t id)
 {
     return gpio_get_level(s_buttons[id].gpio) == 0;
+}
+
+// Suma los vectores de los contactos cerrados: dos contactos vecinos dan una
+// direccion cardinal, uno solo da una diagonal (dos bits).
+static uint32_t joystick_read(void)
+{
+    int x = 0, y = 0;
+    for (button_id_t id = BTN_UP; id <= BTN_RIGHT; id++) {
+        if (level_is_pressed(id)) {
+            x += s_joy_dir[id].x;
+            y += s_joy_dir[id].y;
+        }
+    }
+    return (y > 0 ? 1u << BTN_UP : 0) | (y < 0 ? 1u << BTN_DOWN : 0) | (x < 0 ? 1u << BTN_LEFT : 0) |
+           (x > 0 ? 1u << BTN_RIGHT : 0);
 }
 
 /*
@@ -83,15 +111,24 @@ static void buttons_task(void *arg)
 
         gpio_intr_enable(s_buttons[id].gpio);
 
+        // Para el joystick se releen los cuatro contactos juntos despues del
+        // debounce, asi dos contactos que cierran casi a la vez dan un solo evento.
         const uint32_t bit = 1u << id;
-        bool pressed = level_is_pressed(id);
-        if (pressed == !!(s_state & bit)) {
-            continue;
+        uint32_t state = s_state;
+        if (bit & JOY_MASK) {
+            state = (state & ~JOY_MASK) | joystick_read();
+        } else {
+            state = level_is_pressed(id) ? (state | bit) : (state & ~bit);
         }
-        s_state = pressed ? (s_state | bit) : (s_state & ~bit);
+        const uint32_t changed = state ^ s_state;
+        s_state = state;
 
-        const button_event_t ev = {.id = id, .pressed = pressed};
-        xQueueSend(s_event_queue, &ev, 0);
+        for (int i = 0; i < BTN_COUNT; i++) {
+            if (changed & (1u << i)) {
+                const button_event_t ev = {.id = i, .pressed = !!(state & (1u << i))};
+                xQueueSend(s_event_queue, &ev, 0);
+            }
+        }
     }
 }
 
@@ -128,11 +165,13 @@ esp_err_t buttons_init(void)
                             "isr add of %s failed", s_buttons[i].name);
     }
 
+    uint32_t state = joystick_read();
     for (int i = 0; i < BTN_COUNT; i++) {
-        if (level_is_pressed(i)) {
-            s_state |= 1u << i;
+        if (!((1u << i) & JOY_MASK) && level_is_pressed(i)) {
+            state |= 1u << i;
         }
     }
+    s_state = state;
     return ESP_OK;
 }
 

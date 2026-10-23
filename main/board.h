@@ -25,8 +25,8 @@
 #define BOARD_LCD_WIDTH         128
 #define BOARD_LCD_HEIGHT        64
 
-// Esto esta mal pq habia que rotar 45 grados el joystick asi que bueno...
-// Hagan una rotacion ustedes confio en que pueden.
+// Contactos crudos del joystick. El joystick esta montado rotado 45 grados, asi
+// que cada contacto queda en una diagonal fisica: buttons.c lo compensa.
 #define BOARD_KEY_UP_IO         GPIO_NUM_9
 #define BOARD_KEY_DOWN_IO       GPIO_NUM_11
 #define BOARD_KEY_LEFT_IO       GPIO_NUM_12
