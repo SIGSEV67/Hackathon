@@ -5,7 +5,8 @@
 // Store de mensajes: ring de metadatos + bloques de voz (en PSRAM si hay).
 // Thread-safe. Privado del componente.
 
-#define VOICE_BLOCK_BYTES (MESSAGES_VOICE_BLOCK_SAMPLES / 2)
+#define VOICE_BLOCK_BYTES  (MESSAGES_VOICE_BLOCK_SAMPLES / 2)
+#define STORE_MAX_MESSAGES 48
 
 typedef struct {
     int16_t predictor;
@@ -20,9 +21,14 @@ esp_err_t store_init(size_t voice_budget_bytes);
 esp_err_t store_add(const message_t *msg, uint32_t *out_id);
 
 // Agrega una voz con msg->voice_blocks bloques vacios. Si no hay memoria, libera
-// las voces mas viejas. voice_ref identifica la voz dentro de su origen.
-esp_err_t store_add_voice(const message_t *msg, uint16_t voice_ref, uint32_t *out_id);
-bool store_find_voice(mesh_node_id_t origin, uint16_t voice_ref, uint32_t *out_id);
+// las voces mas viejas.
+esp_err_t store_add_voice(const message_t *msg, uint32_t *out_id);
+
+// Busca un texto o voz por su identidad en la red (origin, ref).
+bool store_find(mesh_node_id_t origin, uint16_t ref, uint32_t *out_id);
+
+// Marca un privado como entregado. Devuelve true si no lo estaba.
+bool store_set_delivered(uint32_t id);
 
 void store_remove(uint32_t id);
 
@@ -38,5 +44,9 @@ esp_err_t store_voice_truncate(uint32_t id, uint16_t blocks);
 uint16_t store_voice_gain(uint32_t id);
 void store_voice_set_gain(uint32_t id, uint16_t gain_q8);
 
+// out puede ser NULL para solo preguntar si sigue.
 bool store_get(uint32_t id, message_t *out);
-size_t store_list(message_t *out, size_t max, uint32_t after_id);
+
+// Del mas nuevo al mas viejo, con id > after_id y que pasen `keep` (NULL = todos).
+size_t store_list(message_t *out, size_t max, uint32_t after_id, bool (*keep)(const message_t *));
+size_t store_count(bool (*keep)(const message_t *));

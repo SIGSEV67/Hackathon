@@ -42,7 +42,7 @@ static void on_button(void *arg, esp_event_base_t base, int32_t event, void *dat
 
     if (btn == PTT_KEY) {
         if (pressed) {
-            messages_voice_start();
+            messages_voice_start(MESSAGES_TO_ALL);
         } else {
             messages_voice_stop();
         }

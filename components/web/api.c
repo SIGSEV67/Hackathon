@@ -1,9 +1,9 @@
 // API JSON para la app web:
-//   GET  /api/state             nodo propio, nodos de la red, estadisticas
+//   GET  /api/state             nodo propio, nodos de la red, historial, estadisticas
 //   GET  /api/messages?after=N  mensajes con id > N, del mas nuevo al mas viejo
 //   GET  /api/voice?id=N        mensaje de voz como WAV (PCM 16 bits, 8 kHz)
 //   POST /api/alert?kind=N      manda una alerta (alert_kind_t)
-//   POST /api/text              manda el body como texto
+//   POST /api/text?to=ID        manda el body como texto (to = id de 8 hex: privado)
 //   POST /api/name              renombra este nodo con el body
 
 #include <stdlib.h>
@@ -38,7 +38,7 @@ static esp_err_t reply_ok(httpd_req_t *req)
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
-static bool query_int(httpd_req_t *req, const char *key, long *out)
+static bool query_num(httpd_req_t *req, const char *key, int base, long long *out)
 {
     char query[64], val[16];
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
@@ -46,8 +46,18 @@ static bool query_int(httpd_req_t *req, const char *key, long *out)
         return false;
     }
     char *end;
-    *out = strtol(val, &end, 10);
+    *out = strtoll(val, &end, base);
     return end != val && *end == '\0';
+}
+
+static bool query_int(httpd_req_t *req, const char *key, long *out)
+{
+    long long v;
+    if (!query_num(req, key, 10, &v)) {
+        return false;
+    }
+    *out = (long)v;
+    return true;
 }
 
 // Lee el body como string (sin espacios al principio ni al final).
@@ -129,8 +139,23 @@ static esp_err_t get_state(httpd_req_t *req)
              "],\"stats\":{\"rx\":%" PRIu32 ",\"tx\":%" PRIu32 ",\"fwd\":%" PRIu32 ",\"dup\":%" PRIu32
              ",\"dropped\":%" PRIu32 "}",
              stats.rx, stats.tx, stats.fwd, stats.dup, stats.dropped);
-    json_fmt(&out, ",\"rec\":{\"active\":%s,\"ms\":%" PRIu32 "}}", recording ? "true" : "false", rec_ms);
+    json_fmt(&out, ",\"rec\":{\"active\":%s,\"ms\":%" PRIu32 "}", recording ? "true" : "false", rec_ms);
     free(nodes);
+
+    // Historial de nodos conocidos: para elegir el destino de un privado.
+    presence_known_t *known = malloc(sizeof(presence_known_t) * PRESENCE_MAX_KNOWN);
+    const size_t n_known = known ? presence_known(known, PRESENCE_MAX_KNOWN) : 0;
+    json_raw(&out, ",\"known\":[");
+    for (size_t i = 0; i < n_known; i++) {
+        json_raw(&out, i ? ",{\"id\":" : "{\"id\":");
+        json_id(&out, known[i].id);
+        json_raw(&out, ",\"name\":");
+        json_str(&out, known[i].name);
+        json_fmt(&out, ",\"alive\":%s,\"seen\":%s,\"age\":%" PRIu32 "}", known[i].alive ? "true" : "false",
+                 known[i].seen ? "true" : "false", known[i].age_ms / 1000);
+    }
+    free(known);
+    json_fmt(&out, "],\"transit\":%u}", (unsigned)messages_transit_count());
     return json_end(&out);
 }
 
@@ -173,6 +198,15 @@ static esp_err_t get_messages(httpd_req_t *req)
         json_str(&out, from);
         json_fmt(&out, ",\"hops\":%d,\"age\":%" PRIu32, m->hops == MESSAGE_HOPS_SELF ? -1 : m->hops,
                  (now - m->received_ms) / 1000);
+        if (m->dest != MESSAGES_TO_ALL) {
+            char to[PRESENCE_NAME_MAX + 1];
+            presence_name_of(m->dest, to, sizeof(to));
+            json_raw(&out, ",\"to\":");
+            json_id(&out, m->dest);
+            json_raw(&out, ",\"to_name\":");
+            json_str(&out, to);
+            json_fmt(&out, ",\"delivered\":%s", m->delivered ? "true" : "false");
+        }
         switch (m->kind) {
         case MESSAGE_ALERT:
             json_fmt(&out, ",\"alert\":%d,\"label\":", m->alert);
@@ -265,11 +299,15 @@ static esp_err_t post_alert(httpd_req_t *req)
 
 static esp_err_t post_text(httpd_req_t *req)
 {
+    long long to = MESSAGES_TO_ALL;
+    if (query_num(req, "to", 16, &to) && (to < 0 || to > UINT32_MAX || to == mesh_self_id())) {
+        return reply_error(req, "400 Bad Request", "bad destination");
+    }
     char text[MESSAGES_TEXT_MAX + 1];
     if (read_body(req, text, sizeof(text)) <= 0) {
         return reply_error(req, "400 Bad Request", "text must be 1-160 bytes");
     }
-    if (messages_send_text(text) != ESP_OK) {
+    if (messages_send_text((mesh_node_id_t)to, text) != ESP_OK) {
         return reply_error(req, "503 Service Unavailable", "mesh busy");
     }
     return reply_ok(req);

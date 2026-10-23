@@ -11,12 +11,11 @@
 
 static const char *TAG = "store";
 
-#define MAX_MESSAGES 48
+#define MAX_MESSAGES STORE_MAX_MESSAGES
 
 typedef struct {
     bool used;
     message_t msg;
-    uint16_t voice_ref;
     uint16_t gain_q8;
     voice_block_t *blocks;  // msg.voice_blocks bloques, solo para voz
 } slot_t;
@@ -95,7 +94,7 @@ esp_err_t store_add(const message_t *msg, uint32_t *out_id)
     return ESP_OK;
 }
 
-esp_err_t store_add_voice(const message_t *msg, uint16_t voice_ref, uint32_t *out_id)
+esp_err_t store_add_voice(const message_t *msg, uint32_t *out_id)
 {
     const size_t bytes = msg->voice_blocks * sizeof(voice_block_t);
     ESP_RETURN_ON_FALSE(msg->voice_blocks > 0 && bytes <= s_voice_budget, ESP_ERR_INVALID_SIZE, TAG,
@@ -112,7 +111,6 @@ esp_err_t store_add_voice(const message_t *msg, uint16_t voice_ref, uint32_t *ou
     }
     slot_t *slot = push(msg);
     slot->msg.voice_received = 0;
-    slot->voice_ref = voice_ref;
     slot->blocks = blocks;
     s_voice_used += bytes;
     *out_id = slot->msg.id;
@@ -120,19 +118,33 @@ esp_err_t store_add_voice(const message_t *msg, uint16_t voice_ref, uint32_t *ou
     return ESP_OK;
 }
 
-bool store_find_voice(mesh_node_id_t origin, uint16_t voice_ref, uint32_t *out_id)
+bool store_find(mesh_node_id_t origin, uint16_t ref, uint32_t *out_id)
 {
     bool found = false;
     LOCK();
     for (int i = 0; i < MAX_MESSAGES && !found; i++) {
-        const slot_t *slot = &s_slots[i];
-        if (slot->used && slot->blocks && slot->msg.origin == origin && slot->voice_ref == voice_ref) {
-            *out_id = slot->msg.id;
+        const message_t *m = &s_slots[i].msg;
+        // Las alertas no tienen ref (no se reenvian), no participan.
+        if (s_slots[i].used && m->kind != MESSAGE_ALERT && m->origin == origin && m->ref == ref) {
+            *out_id = m->id;
             found = true;
         }
     }
     UNLOCK();
     return found;
+}
+
+bool store_set_delivered(uint32_t id)
+{
+    bool changed = false;
+    LOCK();
+    slot_t *slot = find(id);
+    if (slot && !slot->msg.delivered) {
+        slot->msg.delivered = true;
+        changed = true;
+    }
+    UNLOCK();
+    return changed;
 }
 
 void store_remove(uint32_t id)
@@ -231,21 +243,34 @@ bool store_get(uint32_t id, message_t *out)
 {
     LOCK();
     const slot_t *slot = find(id);
-    if (slot) {
+    if (slot && out) {
         *out = slot->msg;
     }
     UNLOCK();
     return slot != NULL;
 }
 
-size_t store_list(message_t *out, size_t max, uint32_t after_id)
+size_t store_list(message_t *out, size_t max, uint32_t after_id, bool (*keep)(const message_t *))
 {
     size_t n = 0;
     LOCK();
     for (int i = 1; i <= MAX_MESSAGES && n < max; i++) {
         const slot_t *slot = &s_slots[(s_head - i + MAX_MESSAGES) % MAX_MESSAGES];
-        if (slot->used && slot->msg.id > after_id) {
+        if (slot->used && slot->msg.id > after_id && (!keep || keep(&slot->msg))) {
             out[n++] = slot->msg;
+        }
+    }
+    UNLOCK();
+    return n;
+}
+
+size_t store_count(bool (*keep)(const message_t *))
+{
+    size_t n = 0;
+    LOCK();
+    for (int i = 0; i < MAX_MESSAGES; i++) {
+        if (s_slots[i].used && keep(&s_slots[i].msg)) {
+            n++;
         }
     }
     UNLOCK();

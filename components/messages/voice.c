@@ -5,7 +5,6 @@
 #include "audio.h"
 #include "esp_check.h"
 #include "esp_log.h"
-#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
@@ -24,8 +23,12 @@ _Static_assert(AUDIO_SAMPLE_RATE_HZ == 2 * MESSAGES_VOICE_SAMPLE_RATE, "voice de
 #define SEND_SPACING_MS   5   // aire libre entre bloques para los reenvios de los vecinos
 #define SEND_WAIT_MS      500
 
+// Igual que el texto, la identidad del mensaje va en el payload para que un
+// custodio pueda reenviarlo tal cual.
 typedef struct __attribute__((packed)) {
-    uint16_t voice_ref;
+    uint32_t origin;
+    uint16_t ref;
+    uint32_t dest;
     uint16_t index;
     uint16_t count;
     int16_t predictor;
@@ -44,7 +47,6 @@ static struct {
     volatile bool busy;
     volatile bool active;
     uint32_t msg_id;
-    uint16_t voice_ref;
     volatile uint16_t blocks;
     uint32_t start_ms;
     adpcm_state_t enc;
@@ -55,7 +57,6 @@ static struct {
     int pcm_len;
 } s_rec;
 
-static uint16_t s_next_ref;
 static TaskHandle_t s_task;
 
 // --- grabacion (task del mic) -------------------------------------------------
@@ -106,35 +107,45 @@ static void on_mic(const int16_t *samples, size_t count, void *ctx)
 
 // --- envio y cierre (task propio) ----------------------------------------------
 
-static void send_voice(uint32_t id, uint16_t ref, uint16_t blocks)
+// Manda los bloques que tengamos del mensaje (un custodio puede tener huecos).
+static esp_err_t send_voice(const message_t *msg)
 {
+    const uint16_t blocks = msg->voice_blocks;
+    uint16_t sent = 0;
     for (uint16_t i = 0; i < blocks; i++) {
         voice_block_t block;
-        if (store_voice_get(id, i, &block) != ESP_OK) {
-            ESP_LOGW(TAG, "message %" PRIu32 " gone while sending", id);
-            return;
+        if (store_voice_get(msg->id, i, &block) != ESP_OK) {
+            ESP_LOGW(TAG, "message %" PRIu32 " gone while sending", msg->id);
+            return ESP_ERR_NOT_FOUND;
+        }
+        if (!block.present) {
+            continue;
         }
         wire_voice_t w = {
-            .voice_ref = ref,
+            .origin = msg->origin,
+            .ref = msg->ref,
+            .dest = msg->dest,
             .index = i,
             .count = blocks,
             .predictor = block.predictor,
             .step_index = block.index,
         };
         memcpy(w.data, block.data, sizeof(w.data));
-        if (mesh_send(MESH_TYPE_VOICE, &w, sizeof(w), pdMS_TO_TICKS(SEND_WAIT_MS)) != ESP_OK) {
+        if (mesh_send(MESH_TYPE_VOICE, &w, sizeof(w), pdMS_TO_TICKS(SEND_WAIT_MS)) == ESP_OK) {
+            sent++;
+        } else {
             ESP_LOGW(TAG, "block %u/%u not sent", i, blocks);
         }
         vTaskDelay(pdMS_TO_TICKS(SEND_SPACING_MS));
     }
-    ESP_LOGI(TAG, "sent voice %" PRIu32 " (%u blocks, %u ms)", id, blocks, blocks * BLOCK_MS);
+    ESP_LOGI(TAG, "sent voice %" PRIu32 " (%u/%u blocks, %u ms)", msg->id, sent, blocks, blocks * BLOCK_MS);
+    return sent ? ESP_OK : ESP_FAIL;
 }
 
 static void finish_recording(void)
 {
     vTaskDelay(pdMS_TO_TICKS(STOP_SETTLE_MS));
     const uint32_t id = s_rec.msg_id;
-    const uint16_t ref = s_rec.voice_ref;
     const uint16_t blocks = s_rec.blocks;
     s_rec.busy = false;
 
@@ -147,7 +158,10 @@ static void finish_recording(void)
     store_voice_truncate(id, blocks);
     messages_notify(MESSAGES_EVENT_REC_STOPPED, id);
     messages_notify(MESSAGES_EVENT_NEW, id);
-    send_voice(id, ref, blocks);
+    message_t msg;
+    if (store_get(id, &msg) && send_voice(&msg) == ESP_OK) {
+        courier_sent(id);
+    }
 }
 
 static void voice_task(void *arg)
@@ -172,27 +186,53 @@ static void on_voice(const mesh_rx_meta_t *meta, const void *payload, size_t len
     }
 
     uint32_t id;
-    if (!store_find_voice(meta->origin, w.voice_ref, &id)) {
+    if (!store_find(w.origin, w.ref, &id)) {
         const message_t msg = {
             .kind = MESSAGE_VOICE,
-            .origin = meta->origin,
+            .origin = w.origin,
+            .ref = w.ref,
+            .dest = w.dest,
             .hops = meta->hops,
             .received_ms = mesh_now_ms(),
             .voice_blocks = w.count,
         };
-        if (store_add_voice(&msg, w.voice_ref, &id) != ESP_OK) {
+        if (store_add_voice(&msg, &id) != ESP_OK) {
             return;
         }
-        ESP_LOGI(TAG, "incoming voice from %08" PRIx32 " (%u ms)", meta->origin, w.count * BLOCK_MS);
-        messages_notify(MESSAGES_EVENT_NEW, id);
+        if (messages_is_visible(&msg)) {
+            ESP_LOGI(TAG, "incoming %svoice from %08" PRIx32 " (%u ms)", msg.dest ? "private " : "", msg.origin,
+                     w.count * BLOCK_MS);
+            messages_notify(MESSAGES_EVENT_NEW, id);
+        } else {
+            ESP_LOGI(TAG, "holding private voice %08" PRIx32 "/%u for %08" PRIx32, msg.origin, msg.ref, msg.dest);
+        }
     }
 
     voice_block_t block = {.predictor = w.predictor, .index = w.step_index};
     memcpy(block.data, w.data, sizeof(block.data));
-    bool completed;
-    if (store_voice_put(id, w.index, &block, &completed) == ESP_OK && completed) {
+    bool completed = false;
+    const esp_err_t err = store_voice_put(id, w.index, &block, &completed);
+
+    message_t msg;
+    if (!store_get(id, &msg)) {
+        return;
+    }
+    if (err == ESP_ERR_INVALID_STATE) {
+        // Bloque repetido: alguien mas esta reenviando este mensaje.
+        courier_heard(id);
+        if (msg.dest == mesh_self_id() && msg.voice_received == msg.voice_blocks) {
+            courier_ack(&msg);  // nuestro ACK se pudo haber perdido
+        }
+        return;
+    }
+    if (err == ESP_OK && completed) {
         ESP_LOGI(TAG, "voice %" PRIu32 " complete", id);
-        messages_notify(MESSAGES_EVENT_UPDATED, id);
+        if (messages_is_visible(&msg)) {
+            messages_notify(MESSAGES_EVENT_UPDATED, id);
+        }
+        if (msg.dest == mesh_self_id()) {
+            courier_ack(&msg);
+        }
     }
 }
 
@@ -200,7 +240,6 @@ static void on_voice(const mesh_rx_meta_t *meta, const void *payload, size_t len
 
 esp_err_t voice_init(void)
 {
-    s_next_ref = (uint16_t)esp_random();
     ESP_RETURN_ON_FALSE(xTaskCreate(voice_task, "voice", 4096, NULL, 5, &s_task) == pdPASS, ESP_ERR_NO_MEM, TAG,
                         "task create failed");
     ESP_RETURN_ON_ERROR(audio_mic_add_sink(on_mic, NULL), TAG, "mic sink failed");
@@ -208,23 +247,29 @@ esp_err_t voice_init(void)
     return ESP_OK;
 }
 
-esp_err_t messages_voice_start(void)
+esp_err_t voice_resend(const message_t *msg)
+{
+    return send_voice(msg);
+}
+
+esp_err_t messages_voice_start(mesh_node_id_t dest)
 {
     ESP_RETURN_ON_FALSE(!s_rec.busy, ESP_ERR_INVALID_STATE, TAG, "already recording");
+    ESP_RETURN_ON_FALSE(dest != mesh_self_id(), ESP_ERR_INVALID_ARG, TAG, "can't send to self");
 
-    const uint16_t ref = s_next_ref++;
     const message_t msg = {
         .kind = MESSAGE_VOICE,
         .origin = mesh_self_id(),
+        .ref = messages_next_ref(),
+        .dest = dest,
         .hops = MESSAGE_HOPS_SELF,
         .received_ms = mesh_now_ms(),
         .voice_blocks = MAX_BLOCKS,
     };
     uint32_t id;
-    ESP_RETURN_ON_ERROR(store_add_voice(&msg, ref, &id), TAG, "no room to record");
+    ESP_RETURN_ON_ERROR(store_add_voice(&msg, &id), TAG, "no room to record");
 
     s_rec.msg_id = id;
-    s_rec.voice_ref = ref;
     s_rec.blocks = 0;
     s_rec.start_ms = mesh_now_ms();
     s_rec.enc = (adpcm_state_t){0};
@@ -234,7 +279,7 @@ esp_err_t messages_voice_start(void)
     s_rec.busy = true;
     s_rec.active = true;
 
-    ESP_LOGI(TAG, "recording...");
+    ESP_LOGI(TAG, "recording%s...", dest ? " private" : "");
     messages_notify(MESSAGES_EVENT_REC_STARTED, id);
     return ESP_OK;
 }

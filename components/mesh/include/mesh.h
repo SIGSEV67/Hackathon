@@ -23,6 +23,7 @@ typedef enum {
     MESH_TYPE_ALERT = 2,
     MESH_TYPE_TEXT = 3,
     MESH_TYPE_VOICE = 4,
+    MESH_TYPE_ACK = 5,
     MESH_TYPE_MAX,
 } mesh_type_t;
 
