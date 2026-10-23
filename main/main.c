@@ -71,8 +71,9 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "Hackathon board demo starting");
 
-    bool display_ok = display_init() == ESP_OK;
-    if (!display_ok) {
+    esp_err_t display_err = display_init();
+    bool display_ok = display_err == ESP_OK;
+    if (!display_ok && display_err != ESP_ERR_NOT_SUPPORTED) {
         ESP_LOGE(TAG, "display init failed - continuing without screen");
     }
 

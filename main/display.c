@@ -16,6 +16,30 @@
 
 static const char *TAG = "display";
 
+#if !BOARD_HAS_DISPLAY
+
+// Perfil psram: el display comparte pines con la PSRAM, todo es no-op y
+// nunca se tocan los GPIO 36/37.
+
+esp_err_t display_init(void)
+{
+    ESP_LOGW(TAG, "display disabled in this build (PSRAM uses GPIO 33-37)");
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+void display_clear(void) {}
+void display_set_pixel(int x, int y, bool on) {}
+void display_fill_rect(int x, int y, int w, int h, bool on) {}
+void display_draw_rect(int x, int y, int w, int h) {}
+void display_text(int x, int y, const char *str, bool invert) {}
+esp_err_t display_flush(void) { return ESP_ERR_NOT_SUPPORTED; }
+
+#else
+
+#if CONFIG_SPIRAM
+#error "SSD1306 display (GPIO 36/37) cannot be used together with octal PSRAM (GPIO 33-37)"
+#endif
+
 #define LCD_HOST        SPI2_HOST
 #define LCD_SPI_HZ      (10 * 1000 * 1000)
 #define FB_SIZE         (BOARD_LCD_WIDTH * BOARD_LCD_HEIGHT / 8)
@@ -265,3 +289,5 @@ esp_err_t display_flush(void)
                         "flush timeout");
     return ESP_OK;
 }
+
+#endif // BOARD_HAS_DISPLAY

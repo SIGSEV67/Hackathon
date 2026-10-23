@@ -1,6 +1,7 @@
 #pragma once
 
 #include "driver/gpio.h"
+#include "sdkconfig.h"
 
 #define BOARD_SPK_DIN_IO        GPIO_NUM_4
 #define BOARD_SPK_BCLK_IO       GPIO_NUM_5
@@ -9,11 +10,18 @@
 #define BOARD_MIC_CLK_IO        GPIO_NUM_7
 #define BOARD_MIC_DOUT_IO       GPIO_NUM_15
 
+// La PSRAM octal usa internamente los GPIO 33-37, que pisan SCL/SDA del display.
+// Con PSRAM los pines del LCD no se definen: cualquier codigo que los use no compila.
+#if CONFIG_SPIRAM
+#define BOARD_HAS_DISPLAY       0
+#else
+#define BOARD_HAS_DISPLAY       1
 #define BOARD_LCD_SCL_IO        GPIO_NUM_36
 #define BOARD_LCD_SDA_IO        GPIO_NUM_37
 #define BOARD_LCD_RST_IO        GPIO_NUM_40
 #define BOARD_LCD_DC_IO         GPIO_NUM_39
 #define BOARD_LCD_CS_IO         GPIO_NUM_38
+#endif
 #define BOARD_LCD_WIDTH         128
 #define BOARD_LCD_HEIGHT        64
 
