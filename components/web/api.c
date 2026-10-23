@@ -110,7 +110,12 @@ static void json_node(json_out_t *out, const presence_node_t *n)
     for (int i = 0; i < n->n_links; i++) {
         json_raw(out, i ? ",{\"id\":" : "{\"id\":");
         json_id(out, n->links[i].id);
-        json_fmt(out, ",\"rssi\":%d}", n->links[i].rssi);
+        json_fmt(out, ",\"rssi\":%d", n->links[i].rssi);
+        if (n->links[i].dist_dm) {
+            json_fmt(out, ",\"dist\":%u.%u,\"ftm\":%s", n->links[i].dist_dm / 10, n->links[i].dist_dm % 10,
+                     n->links[i].dist_ftm ? "true" : "false");
+        }
+        json_raw(out, "}");
     }
     json_raw(out, "]}");
 }

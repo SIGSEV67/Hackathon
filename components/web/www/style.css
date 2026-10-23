@@ -150,6 +150,7 @@ h2 { margin: 30px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--li
 /* --- Mapa --- */
 #map { display: block; width: 100%; height: auto; background: var(--bg2); border: 1px solid var(--line); }
 #map text { fill: var(--text); font: 9px var(--display); text-anchor: middle; pointer-events: none; }
+#map .dist { fill: var(--muted); font: 8px var(--mono); }
 #map .self { fill: none; stroke: var(--bright); stroke-width: 1.5; stroke-dasharray: 3 2; }
 .legend { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 11px; color: var(--muted); }
 .legend .ramp { flex: 0 0 90px; height: 8px; border: 1px solid var(--line);

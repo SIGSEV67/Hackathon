@@ -503,17 +503,30 @@ function updateMap(state) {
   }
   for (const id of [...map.pos.keys()]) if (!ids.has(id)) map.pos.delete(id);
 
-  // Un enlace por par, con el mejor RSSI que reporte cualquiera de los dos.
+  // Un enlace por par, con el mejor RSSI que reporte cualquiera de los dos y
+  // la mejor distancia (FTM le gana a RSSI).
   const edges = new Map();
   for (const n of all) {
     for (const l of n.links) {
       if (!ids.has(l.id)) continue;
       const key = n.id < l.id ? `${n.id}-${l.id}` : `${l.id}-${n.id}`;
-      const prev = edges.get(key);
-      if (!prev || l.rssi > prev.rssi) edges.set(key, { a: n.id, b: l.id, rssi: l.rssi });
+      const prev = edges.get(key) || { a: n.id, b: l.id, rssi: -127 };
+      if (l.rssi > prev.rssi) prev.rssi = l.rssi;
+      if (l.dist !== undefined && (prev.dist === undefined || (l.ftm && !prev.ftm))) {
+        prev.dist = l.dist;
+        prev.ftm = l.ftm;
+      }
+      edges.set(key, prev);
     }
   }
   map.edges = [...edges.values()];
+  // Escala: que el enlace más largo ocupe ~60% del mapa.
+  const longest = Math.max(1, ...map.edges.filter((e) => e.dist !== undefined).map((e) => e.dist));
+  map.pxPerM = (Math.min(W, H) * 0.6) / longest;
+}
+
+function distText(d) {
+  return d < 10 ? `${d.toFixed(1)} m` : `${Math.round(d)} m`;
 }
 
 function stepLayout() {
@@ -532,7 +545,9 @@ function stepLayout() {
     const a = map.pos.get(e.a), b = map.pos.get(e.b);
     const dx = b.x - a.x, dy = b.y - a.y;
     const d = Math.sqrt(dx * dx + dy * dy) || 1;
-    const f = (d - 100) * 0.02;
+    // Con distancia, el resorte mide eso (las de RSSI tiran menos: son dudosas).
+    const rest = e.dist !== undefined ? Math.max(24, e.dist * map.pxPerM) : 100;
+    const f = (d - rest) * (e.dist === undefined ? 0.02 : e.ftm ? 0.06 : 0.03);
     a.vx += (dx / d) * f; a.vy += (dy / d) * f;
     b.vx -= (dx / d) * f; b.vy -= (dy / d) * f;
   }
@@ -555,7 +570,14 @@ function drawMap() {
   for (const e of map.edges) {
     const a = map.pos.get(e.a), b = map.pos.get(e.b);
     const quality = Math.min(1, Math.max(0.1, (e.rssi + 95) / 50));  // -95 dBm malo, -45 dBm excelente
-    parts.push(mk('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: '#6B5A28', 'stroke-width': 1 + quality * 4 }));
+    const line = { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: '#6B5A28', 'stroke-width': 1 + quality * 4 };
+    if (e.dist !== undefined && !e.ftm) line['stroke-dasharray'] = '4 3';
+    parts.push(mk('line', line));
+    if (e.dist !== undefined) {
+      const label = mk('text', { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 - 4, class: 'dist' });
+      label.textContent = (e.ftm ? '' : '~') + distText(e.dist);
+      parts.push(label);
+    }
   }
   map.nodes.forEach((n, i) => {
     const p = map.pos.get(n.id);
@@ -608,11 +630,14 @@ function dmButton(id) {
 }
 
 function renderNodes(state) {
+  const fromSelf = new Map(state.self.links.filter((l) => l.dist !== undefined).map((l) => [l.id, l]));
   const rows = [state.self, ...state.nodes].map((n, i) => {
     const li = el('li');
     li.append(el('span', 'when', i === 0 ? 'este' : hopsText(n.hops)));
     const name = el('span', 'name', `${n.name} `);
-    name.append(el('small', '', i === 0 ? '' : `· ${ago(Math.floor(n.age / 1000))}`));
+    const link = fromSelf.get(n.id);
+    const dist = link ? ` · ${link.ftm ? '' : '~'}${distText(link.dist)}` : '';
+    name.append(el('small', '', i === 0 ? '' : `· ${ago(Math.floor(n.age / 1000))}${dist}`));
     const bar = el('span', 'bar');
     const fill = el('i');
     fill.style.width = `${n.noise}%`;
