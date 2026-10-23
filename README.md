@@ -8,16 +8,25 @@ celular colapsa, un corte de luz o un lugar sin señal.
 - **Alertas rápidas** (SOS, MÉDICO, PELIGRO, ESTOY BIEN) con un botón de la placa o desde el celular.
 - **Mensajes de voz** push-to-talk: se graban en la placa y viajan comprimidos por la mesh.
 - **Texto libre** desde el celular.
-- **Mensajes privados** (texto o voz) a un nodo puntual, aunque no esté en la red:
-  los demás nodos lo guardan y se lo pasan cuando aparece (store-and-forward).
+- **Mensajes privados** (texto, voz o archivos) a un celu o a una placa, aunque no esté en la red:
+  las placas lo guardan y se lo pasan cuando aparece (store-and-forward), con ✓ al llegar y ✓✓ al verlo.
 - **Llamadas** entre placas tipo walkie-talkie: se habla en vivo con la tecla apretada.
-- **Voces desde el celular** y **fotos/archivos** (las fotos se achican solas para que entren).
+- **Voces desde el celular** y **fotos/archivos** (las fotos se achican solas para que entren);
+  entre celus, **walkie por clips**: lo que grabás sale solo y lo del otro suena solo.
 - **Parlante en la placa** para escuchar las voces.
 - **Mapa de la red y del ruido**: qué nodos hay, cómo están enlazados, cuánto ruido mide cada uno y a
   **qué distancia** están (medida por WiFi FTM, o estimada por señal).
 
 Cada placa reenvía lo que escucha, así que si un nodo se cae los mensajes siguen
 por los demás.
+
+**Placas y clientes.** Las placas son la red; los celulares se conectan a una
+placa (su *padre*) y la usan de bastión. Cada celu es un usuario con su propio
+ID y nombre: puede escribirle, mandarle voz o archivos en privado a otro celu
+o a una placa, y ve solo lo suyo (más lo que es para todos). La placa también
+es un usuario: con sus botones y su pantalla manda alertas y voces, escucha,
+y llama a otras placas, sin poder ver media. Si un celu se pasa a otra placa,
+sus privados lo siguen.
 
 ## ¿Por qué no LoRa?
 
@@ -54,7 +63,9 @@ parlante, hablar los dos a la vez acoplaría. Mientras uno habla, la pantalla
 dice AL AIRE; el otro ve ESCUCHANDO.
 
 La pantalla **Red** muestra el ID propio en el título y lista el historial de
-nodos conocidos (los que no están, con `--` y hace cuánto se los vio). Los
+placas y celus conocidos (los que no están, con `--` y hace cuánto se los vio;
+los celus como `Nombre@Placa`). A un celu se le manda voz con KEY4; las llamadas
+en vivo son solo entre placas. Los
 privados aparecen con `@` en Mensajes; los propios dicen `a Nombre(ok)` cuando
 llegaron.
 
@@ -71,13 +82,16 @@ un toque sin querer no dispare nada.
    - **Alertas**: botones de alerta (mantener apretado), texto, **● Grabar audio**,
      **＋ Foto / archivo** y el feed (voces para escuchar en el celu o *▶ en la
      placa*, fotos que se ven ahí mismo, archivos para bajar). En **Para** se elige
-     *Todos*, un nodo del historial o *Otro ID…* (las 8 cifras, o las últimas si
-     alcanzan para identificarlo). Los privados propios muestran *en camino…*
-     hasta que vuelve el ✓.
+     *Todos*, un celu o una placa del historial, u *Otro ID…* (las 8 cifras, o las
+     últimas si alcanzan para identificarlo). Los privados propios muestran *en
+     camino…*, después ✓ (llegó a la placa del destino) y ✓✓ (el destino lo vio).
+     Con un destino privado elegido, **Walkie** hace que cada audio que grabás le
+     salga solo y que los suyos suenen solos apenas llegan.
    - **Red**: mapa de nodos coloreados por ruido, con enlaces más gruesos cuanto mejor es la señal
      y largos según la distancia medida (continuos: FTM; punteados con `~`: estimados por RSSI).
-     La lista incluye los nodos del historial que no están, con ✉ para escribirles.
-   - **Nodo**: renombrar el nodo (ej. "Puesto médico") y estadísticas de tráfico.
+     Los celus cuelgan de su placa. La lista incluye los que no están, con ✉ para escribirles.
+   - **Vos**: tu nombre (queda en el celu junto con tu ID), la placa a la que estás
+     conectado, renombrarla (ej. "Puesto médico") y estadísticas de tráfico.
 
 **Audio desde el celular sin HTTPS.** El navegador solo da el micrófono
 (`getUserMedia`) en páginas HTTPS y el portal es HTTP plano. Por eso *Grabar audio*
@@ -141,10 +155,11 @@ versión, tipo, TTL, saltos, seq y origen. Cada nodo reenvía una sola vez cada
 | Tipo | Payload |
 |---|---|
 | `PRESENCE` | nombre, capacidades, ruido, uptime, vecinos con RSSI y distancia (cada ~3 s) |
-| `ALERT` | tipo de alerta |
+| `ALERT` | tipo de alerta y quién la mandó (la placa o uno de sus celus) |
+| `CLIENTS` | celus conectados a la placa que lo manda, con su nombre (después de cada beacon) |
 | `TEXT` | origen, ref, destino y hasta 160 bytes UTF-8 |
 | `VOICE` | origen, ref, destino y un bloque de 55 ms de IMA ADPCM a 8 kHz, con su propio estado del códec |
-| `ACK` | origen y ref del privado que llegó |
+| `ACK` | origen y ref de un privado, y si llegó a la placa del destino o el destino lo vio |
 | `FILE_INFO` | origen, ref, destino, tamaño, tipo y nombre de un archivo |
 | `FILE` | origen, ref, destino y un pedazo de 220 B de archivo |
 | `NACK` | origen, ref y rangos de bloques que le faltan a alguien (voz o archivo) |
@@ -169,9 +184,11 @@ paquetes, unos 80 KB.
 
 #### Privados: store-and-forward
 
-Un privado (destino ≠ 0) viaja igual que un mensaje para todos, pero solo lo
-muestran el destino y quien lo mandó; el resto de los nodos lo guarda **en
-custodia**. Texto y voz llevan su identidad `(origen, ref)` en el payload, así
+Placas y celus comparten el espacio de IDs: el destino de un privado puede ser
+cualquiera de los dos, y cada placa sabe de qué placa cuelga cada celu por los
+paquetes `CLIENTS`. Un privado (destino ≠ 0) viaja igual que un mensaje para
+todos, pero solo lo muestran el destino y quien lo mandó; las placas donde no
+está el destino lo guardan **en custodia**. Texto y voz llevan su identidad `(origen, ref)` en el payload, así
 un custodio puede reenviarlo tal cual y nadie lo muestra dos veces.
 
 - Cuando un nodo con privados pendientes ve aparecer al destino (su beacon de
@@ -179,10 +196,13 @@ un custodio puede reenviarlo tal cual y nadie lo muestra dos veces.
   escucha que otro ya lo reenvió, no lo hace: así no lo mandan todos a la vez.
 - Mientras el destino siga en la red y no confirme, se reintenta cada ~20 s,
   hasta 5 veces por aparición.
-- El destino contesta con un `ACK` que se inunda por la red: el que lo escucha
-  marca el mensaje como entregado y deja de insistir. Si el origen no estaba,
-  el ACK se le reenvía cuando aparece.
-- El historial de nodos (id y último nombre) se guarda en NVS, así se le puede
+- La placa del destino contesta con un `ACK` que se inunda por la red: el que
+  lo escucha marca el mensaje como entregado (✓) y deja de insistir. Cuando el
+  celu destino lo ve, sale un segundo `ACK` de leído (✓✓); a una placa se lo da
+  por visto al llegar. Si el origen no estaba, el ACK se le reenvía cuando aparece.
+- Si un celu se pasa a otra placa antes de ver un privado, las que lo tienen se
+  lo vuelven a mandar ahí (o la placa nueva lo entrega, si ya lo tenía en custodia).
+- El historial de placas y celus (id, tipo, placa padre y último nombre) se guarda en NVS, así se le puede
   escribir a un nodo que no está aunque la placa se haya reiniciado.
 
 Ojo: **privado = dirigido, no cifrado.** Cualquier nodo de la red puede leer
