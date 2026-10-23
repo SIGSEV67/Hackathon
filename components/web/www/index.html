@@ -15,7 +15,7 @@
       <p class="kicker">Red mesh · sin internet</p>
       <h1>SIGSEV</h1>
       <ul class="datos">
-        <li><span class="k">Nodo</span><span id="hero-name">conectando…</span></li>
+        <li><span class="k">Vos</span><span id="hero-name">conectando…</span></li>
         <li><span class="k">Red</span><span id="hero-net">—</span></li>
         <li><span class="k">Ruido</span><span class="meter"><i id="hero-noise"></i></span></li>
       </ul>
@@ -46,7 +46,7 @@
   <nav class="indice" role="tablist" aria-label="Secciones">
     <button role="tab" aria-selected="true" data-tab="feed">Alertas</button>
     <button role="tab" aria-selected="false" data-tab="map">Red</button>
-    <button role="tab" aria-selected="false" data-tab="node">Nodo</button>
+    <button role="tab" aria-selected="false" data-tab="node">Vos</button>
   </nav>
 
   <section id="tab-feed" class="tab">
@@ -60,8 +60,8 @@
     </div>
 
     <h2>Escribir</h2>
-    <p class="nota">A todos o a un nodo en privado. Si el nodo no está en la red, el mensaje espera en los
-      nodos que lo escucharon y le llega cuando aparezca.</p>
+    <p class="nota">A todos, o en privado a un celu o a una placa. Si no está en la red, el mensaje espera en
+      las placas que lo escucharon y le llega cuando aparezca. ✓ llegó a su placa, ✓✓ lo vio.</p>
     <form class="compose stack" id="compose">
       <div class="para">
         <label for="to">Para</label>
@@ -72,6 +72,8 @@
         <input id="text" maxlength="160" autocomplete="off" placeholder="Escribí un mensaje (160)">
         <button type="submit" class="btn">Enviar</button>
       </div>
+      <label class="walkie-row" id="walkie-row" hidden><input type="checkbox" id="walkie"> Walkie: lo que
+        grabás le sale solo y sus audios suenan solos</label>
       <div class="row">
         <button type="button" class="btn ghost" id="rec-btn">● Grabar audio</button>
         <input type="file" id="rec-file" accept="audio/*" capture hidden>
@@ -84,7 +86,7 @@
     <h2>Mensajes</h2>
     <ul class="feed" id="feed"></ul>
     <div class="pendiente" id="feed-empty"><p><strong>Todavía no llegó nada.</strong></p>
-      <p>Las alertas y voces de la red aparecen acá.</p></div>
+      <p>Las alertas de la red y lo que te manden aparecen acá.</p></div>
   </section>
 
   <section id="tab-map" class="tab" hidden>
@@ -94,12 +96,21 @@
       punteadas si son una estimación por señal (mucho más gruesa). La forma es real; hacia dónde apunta, no.</p>
     <svg id="map" viewBox="0 0 360 300" role="img" aria-label="Mapa de la red"></svg>
     <div class="legend"><span>poco ruido</span><span class="ramp"></span><span>mucho ruido</span></div>
-    <h2>Nodos</h2>
+    <h2>Placas y celus</h2>
     <ul class="rows" id="nodes"></ul>
   </section>
 
   <section id="tab-node" class="tab" hidden>
-    <h2>Este nodo</h2>
+    <h2>Vos</h2>
+    <p class="nota">Así te ven los demás. El ID queda guardado en este celu: si te conectás a otra placa, tus
+      privados te siguen.</p>
+    <ul class="datos" id="me"></ul>
+    <form class="compose" id="me-form">
+      <input id="me-name" maxlength="20" autocomplete="off" placeholder="Tu nombre (ej. Ana)">
+      <button type="submit" class="btn">Guardar</button>
+    </form>
+
+    <h2>Esta placa</h2>
     <ul class="datos" id="self"></ul>
     <form class="compose" id="rename">
       <input id="name" maxlength="20" autocomplete="off" placeholder="Nombre (ej. Puesto médico)">
@@ -119,9 +130,10 @@
         mensaje sigue por los demás.</span></li>
       <li><span><b>Llega a todos</b>Se ve en las pantallas de las placas y en cualquier celular conectado
         a cualquier nodo.</span></li>
-      <li><span><b>O a uno solo</b>Un privado va dirigido a un nodo. Si no está, los demás lo guardan y se lo
-        pasan cuando aparece, saltando de nodo en nodo; cuando llega, vuelve un ✓. En la placa: en la pantalla
-        Red marcá un nodo y mantené la tecla de voz. Ojo: es dirigido, no cifrado.</span></li>
+      <li><span><b>O a uno solo</b>Un privado va dirigido a un celu o a una placa. Si no está, los demás lo
+        guardan y se lo pasan cuando aparece, saltando de placa en placa: ✓ cuando llega a su placa, ✓✓ cuando
+        lo ve. Cada celu ve solo lo suyo; la placa, con sus botones, es un usuario más (en la pantalla Red marcá
+        a alguien y mantené la tecla de voz). Ojo: es dirigido, no cifrado.</span></li>
     </ol>
   </section>
 

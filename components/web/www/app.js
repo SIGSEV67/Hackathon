@@ -1,6 +1,9 @@
 // App web del nodo: consulta la API cada pocos segundos y dibuja el estado de la
 // red, el feed de mensajes y el mapa. Sin dependencias: se sirve desde el
 // firmware y el teléfono no tiene internet.
+//
+// Cada celu es un cliente de la placa a la que está conectado: tiene su propio
+// id (lo inventa y lo guarda acá) y su nombre, y solo ve lo suyo.
 'use strict';
 
 const STATE_MS = 2000;
@@ -29,12 +32,43 @@ const app = {
   fileMax: 48 * 1024,
   speaker: false,
   thumbs: new Map(),  // id -> <img>, para no volver a pedir la imagen en cada refresco
+  me: null,           // { id, name } de este celu
+  walkie: '',         // en modo walkie: id del otro (sus audios suenan solos)
+  heard: new Set(),   // voces que el walkie ya reprodujo (o que había al prenderlo)
+  queue: [],          // voces del walkie esperando su turno
 };
+
+// --- identidad del celu ----------------------------------------------------------------
+
+function store(key, value) {
+  try {
+    if (value === undefined) return localStorage.getItem(key);
+    localStorage.setItem(key, value);
+  } catch (e) { /* modo privado: la identidad dura lo que la pestaña */ }
+  return value;
+}
+
+function loadMe() {
+  let id = store('sigsev.id');
+  if (!/^[0-9a-f]{8}$/.test(id || '') || id === '00000000') {
+    const r = new Uint32Array(1);
+    do crypto.getRandomValues(r); while (r[0] === 0);
+    id = store('sigsev.id', r[0].toString(16).padStart(8, '0'));
+  }
+  const name = store('sigsev.name') || `Celu ${id.slice(-4).toUpperCase()}`;
+  app.me = { id, name };
+}
 
 // --- API -----------------------------------------------------------------------
 
-async function api(path, opts) {
-  const res = await fetch(path, opts);
+// Toda URL de la API lleva el id del celu (también las de <img> y descargas).
+function withMe(path) {
+  return `${path}${path.includes('?') ? '&' : '?'}c=${app.me.id}`;
+}
+
+async function api(path, opts = {}) {
+  const headers = { ...(opts.headers || {}), 'X-Client-Name': encodeURIComponent(app.me.name) };
+  const res = await fetch(withMe(path), { ...opts, headers });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || res.status);
   return body;
@@ -51,8 +85,10 @@ function ago(seconds) {
   return `${Math.floor(seconds / 3600)} h`;
 }
 
+const mine = (m) => m.origin === app.me.id;
+
 function hopsText(hops) {
-  if (hops < 0) return 'vos';
+  if (hops < 0) return 'en esta placa';
   if (hops === 0) return 'directo';
   return `${hops + 1} saltos`;
 }
@@ -103,7 +139,7 @@ function fileBody(m, body) {
     body.append(el('div', 'meta', `Recibiendo ${Math.floor((100 * m.got) / m.blocks)}%`));
     return;
   }
-  const url = `/api/file?id=${m.id}`;
+  const url = withMe(`/api/file?id=${m.id}`);
   if (/^image\/(jpeg|png|webp|gif)$/.test(m.mime)) {
     let img = app.thumbs.get(m.id);
     if (!img) {
@@ -123,12 +159,13 @@ function fileBody(m, body) {
 
 async function playVoice(m) {
   app.playing = m.id;
+  app.heard.add(m.id);
   renderFeed();
-  const done = () => { app.playing = null; renderFeed(); };
+  const done = () => { app.playing = null; renderFeed(); playQueued(); };
   try {
     // Se baja entero y se reproduce desde un blob: Safari no reproduce bien
     // audio en streaming chunked sin soporte de Range.
-    const res = await fetch(`/api/voice?id=${m.id}`);
+    const res = await fetch(withMe(`/api/voice?id=${m.id}`));
     if (!res.ok) throw new Error(res.status);
     const url = URL.createObjectURL(await res.blob());
     const audio = new Audio(url);
@@ -140,13 +177,19 @@ async function playVoice(m) {
   }
 }
 
+// ✓ llegó a la placa del destino, ✓✓ el destino lo vio.
+function ticks(m) {
+  if (m.read) return el('span', 'ok', '✓✓ visto');
+  if (m.delivered) return el('span', 'ok', '✓ entregado');
+  return el('span', 'wait', 'en camino…');
+}
+
 function feedMeta(m) {
   const meta = el('div', 'meta');
   if (!m.to) {
-    meta.textContent = `de ${m.from} · ${hopsText(m.hops)}`;
-  } else if (m.hops < 0) {
-    meta.append(`privado para ${m.to_name} · `,
-      m.delivered ? el('span', 'ok', '✓ entregado') : el('span', 'wait', 'en camino…'));
+    meta.textContent = mine(m) ? 'vos · a todos' : `de ${m.from} · ${hopsText(m.hops)}`;
+  } else if (mine(m)) {
+    meta.append(`privado para ${m.to_name} · `, ticks(m));
   } else {
     meta.textContent = `privado de ${m.from} · ${hopsText(m.hops)}`;
   }
@@ -161,7 +204,7 @@ function feedItem(m) {
   const what = el('div', 'what');
   if (m.to) what.append(el('span', 'dm', 'PRIVADO'));
   what.append(describe(m));
-  if (m.age < NEW_FOR_S && m.hops >= 0) what.append(el('span', 'new', 'NEW!'));
+  if (m.age < NEW_FOR_S && !mine(m)) what.append(el('span', 'new', 'NEW!'));
   body.append(what, feedMeta(m));
 
   if (m.kind === 'voice') {
@@ -200,8 +243,8 @@ async function pollMessages() {
     app.messages = messages;
     if (messages.length) app.lastId = Math.max(app.lastId, ...messages.map((m) => m.id));
 
-    const alert = !app.firstLoad && fresh.find((m) => m.kind === 'alert' && m.hops >= 0);
-    const dm = !app.firstLoad && fresh.find((m) => m.to && m.hops >= 0);
+    const alert = !app.firstLoad && fresh.find((m) => m.kind === 'alert' && !mine(m));
+    const dm = !app.firstLoad && fresh.find((m) => m.to && !mine(m) && !(app.walkie && m.origin === app.walkie));
     if (alert) {
       banner(`${ALERT_LABELS[alert.alert]} · ${alert.from} (${hopsText(alert.hops)})`, alert.alert === 3);
       if (navigator.vibrate) navigator.vibrate(alert.alert === 3 ? 200 : [300, 100, 300, 100, 300]);
@@ -212,11 +255,12 @@ async function pollMessages() {
 
     // Aviso cuando un privado nuestro llega a destino.
     for (const m of messages) {
-      if (!m.to || m.hops >= 0) continue;
+      if (!m.to || !mine(m)) continue;
       if (!m.delivered) app.pending.add(m.id);
       else if (app.pending.delete(m.id) && !app.firstLoad) banner(`✓ Le llegó a ${m.to_name}`, true);
     }
     app.firstLoad = false;
+    walkieIncoming(messages);
     renderFeed();
   } catch (e) { /* el nodo puede estar ocupado: reintenta en el próximo ciclo */ }
 }
@@ -251,15 +295,21 @@ function setupAlertButtons() {
 
 const OTHER = 'otro';
 
+function knownName(id) {
+  const k = app.known.find((n) => n.id === id);
+  return k ? k.name : id.slice(-4).toUpperCase();
+}
+
+// Un celu se muestra con la placa de la que cuelga: "Ana @ Puesto médico".
 function knownLabel(k) {
   const where = k.alive ? 'en la red' : k.seen ? `visto hace ${ago(k.age)}` : 'sin ver';
-  return `${k.name} · ${k.id.slice(-4).toUpperCase()} · ${where}`;
+  const who = k.client ? `${k.name} @ ${knownName(k.parent)}` : `${k.name} (placa)`;
+  return `${who} · ${k.id.slice(-4).toUpperCase()} · ${where}`;
 }
 
 // Rehace las opciones solo si cambiaron, para no cerrarle el menú a quien lo
 // tiene abierto, y conserva la elección.
 function renderRecipients(state) {
-  app.known = state.known || [];
   const select = $('#to');
   const options = [['', 'Todos'], ...app.known.map((k) => [k.id, knownLabel(k)]), [OTHER, 'Otro ID…']];
   const key = JSON.stringify(options);
@@ -279,6 +329,8 @@ function updateComposeMode() {
   $('#to-id').hidden = to !== OTHER;
   $('#compose').classList.toggle('private', to !== '');
   $('#text').placeholder = to ? 'Mensaje privado (160)' : 'Escribí un mensaje (160)';
+  $('#walkie-row').hidden = to === '' || to === OTHER;
+  if (app.walkie && app.walkie !== to) setWalkie(false);
 }
 
 function selectRecipient(id) {
@@ -295,6 +347,7 @@ function resolveRecipient() {
   if (to !== OTHER) return to;
   const typed = $('#to-id').value.trim().toLowerCase();
   if (!/^[0-9a-f]{1,8}$/.test(typed)) throw new Error('el ID son hasta 8 cifras hexa');
+  if (typed === app.me.id) throw new Error('ese sos vos');
   if (typed.length === 8) return typed;
   const matches = app.known.filter((k) => k.id.endsWith(typed));
   if (matches.length === 1) return matches[0].id;
@@ -304,6 +357,39 @@ function resolveRecipient() {
 function recipientName(id) {
   const k = app.known.find((n) => n.id === id);
   return k ? k.name : id.toUpperCase();
+}
+
+// --- walkie por clips ----------------------------------------------------------------------
+// Con un contacto elegido: cada audio que grabás le sale solo, y los suyos
+// suenan solos apenas terminan de llegar, uno atrás del otro.
+
+function setWalkie(on) {
+  const to = $('#to').value;
+  app.walkie = on && to && to !== OTHER ? to : '';
+  $('#walkie').checked = !!app.walkie;
+  $('#rec-btn').textContent = app.walkie ? '🎙 Hablar' : '● Grabar audio';
+  $('#compose').classList.toggle('walkie', !!app.walkie);
+  app.queue = [];
+  // Lo que ya estaba no se reproduce: solo lo que llegue de acá en más.
+  for (const m of app.messages) if (m.kind === 'voice') app.heard.add(m.id);
+  if (app.walkie) banner(`Walkie con ${recipientName(app.walkie)}: sus audios suenan solos`, true);
+}
+
+function walkieIncoming(messages) {
+  if (!app.walkie) return;
+  for (const m of [...messages].reverse()) {  // del más viejo al más nuevo
+    if (m.kind !== 'voice' || m.origin !== app.walkie || m.to !== app.me.id) continue;
+    if (m.got < m.blocks || app.heard.has(m.id) || app.queue.some((q) => q.id === m.id)) continue;
+    app.queue.push(m);
+  }
+  playQueued();
+}
+
+function playQueued() {
+  if (app.playing !== null || !app.queue.length) return;
+  const m = app.queue.shift();
+  if (navigator.vibrate) navigator.vibrate(60);
+  playVoice(m);
 }
 
 // --- audio desde el celular --------------------------------------------------------------
@@ -363,7 +449,7 @@ async function sendAudioFile(file) {
     banner(`No se pudo mandar el audio (${e.message || 'formato no soportado'})`);
   } finally {
     button.disabled = false;
-    button.textContent = '● Grabar audio';
+    button.textContent = app.walkie ? '🎙 Hablar' : '● Grabar audio';
   }
 }
 
@@ -443,6 +529,16 @@ async function sendFile(file) {
 
 function setupForms() {
   $('#to').addEventListener('change', updateComposeMode);
+  $('#walkie').addEventListener('change', (ev) => setWalkie(ev.target.checked));
+  $('#me-name').value = app.me.name;
+  $('#me-form').addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const name = $('#me-name').value.trim().slice(0, 20);
+    if (!name) return;
+    app.me.name = store('sigsev.name', name);
+    banner(`Te ven como "${name}"`, true);
+    pollState();
+  });
   $('#file-btn').addEventListener('click', () => $('#file-in').click());
   $('#file-in').addEventListener('change', (ev) => {
     const file = ev.target.files[0];
@@ -479,7 +575,7 @@ function setupForms() {
     try {
       await post('/api/name', name);
       input.value = '';
-      banner(`Ahora este nodo es "${name}"`, true);
+      banner(`Ahora la placa es "${name}"`, true);
       pollState();
     } catch (e) { banner(`Nombre inválido (${e.message})`); }
   });
@@ -493,7 +589,12 @@ const map = { pos: new Map(), nodes: [], edges: [] };
 const W = 360, H = 300;
 
 function updateMap(state) {
-  const all = [state.self, ...state.nodes];
+  const boards = [state.self, ...state.nodes];
+  const boardIds = new Set(boards.map((n) => n.id));
+  // Los celus vivos cuelgan de su placa, chiquitos.
+  const clients = (state.known || []).filter((k) => k.client && k.alive && boardIds.has(k.parent))
+    .map((k) => ({ id: k.id, name: k.name, parent: k.parent, client: true, noise: 0, links: [] }));
+  const all = [...boards, ...clients];
   const ids = new Set(all.map((n) => n.id));
   map.nodes = all;
   for (const n of all) {
@@ -519,7 +620,7 @@ function updateMap(state) {
       edges.set(key, prev);
     }
   }
-  map.edges = [...edges.values()];
+  map.edges = [...edges.values(), ...clients.map((c) => ({ a: c.parent, b: c.id, client: true }))];
   // Escala: que el enlace más largo ocupe ~60% del mapa.
   const longest = Math.max(1, ...map.edges.filter((e) => e.dist !== undefined).map((e) => e.dist));
   map.pxPerM = (Math.min(W, H) * 0.6) / longest;
@@ -546,8 +647,8 @@ function stepLayout() {
     const dx = b.x - a.x, dy = b.y - a.y;
     const d = Math.sqrt(dx * dx + dy * dy) || 1;
     // Con distancia, el resorte mide eso (las de RSSI tiran menos: son dudosas).
-    const rest = e.dist !== undefined ? Math.max(24, e.dist * map.pxPerM) : 100;
-    const f = (d - rest) * (e.dist === undefined ? 0.02 : e.ftm ? 0.06 : 0.03);
+    const rest = e.client ? 34 : e.dist !== undefined ? Math.max(24, e.dist * map.pxPerM) : 100;
+    const f = (d - rest) * (e.client ? 0.08 : e.dist === undefined ? 0.02 : e.ftm ? 0.06 : 0.03);
     a.vx += (dx / d) * f; a.vy += (dy / d) * f;
     b.vx -= (dx / d) * f; b.vy -= (dy / d) * f;
   }
@@ -569,6 +670,10 @@ function drawMap() {
   const parts = [];
   for (const e of map.edges) {
     const a = map.pos.get(e.a), b = map.pos.get(e.b);
+    if (e.client) {
+      parts.push(mk('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: 'client-link' }));
+      continue;
+    }
     const quality = Math.min(1, Math.max(0.1, (e.rssi + 95) / 50));  // -95 dBm malo, -45 dBm excelente
     const line = { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: '#6B5A28', 'stroke-width': 1 + quality * 4 };
     if (e.dist !== undefined && !e.ftm) line['stroke-dasharray'] = '4 3';
@@ -581,6 +686,13 @@ function drawMap() {
   }
   map.nodes.forEach((n, i) => {
     const p = map.pos.get(n.id);
+    if (n.client) {
+      parts.push(mk('circle', { cx: p.x, cy: p.y, r: 5, class: n.id === app.me.id ? 'client me' : 'client' }));
+      const label = mk('text', { x: p.x, y: p.y + 16, class: 'client-name' });
+      label.textContent = n.id === app.me.id ? 'vos' : n.name;
+      parts.push(label);
+      return;
+    }
     const s = 12 + n.noise / 6;  // lado del cuadrado: más ruido, más grande
     if (i === 0) parts.push(mk('rect', { x: p.x - s / 2 - 5, y: p.y - s / 2 - 5, width: s + 10, height: s + 10, class: 'self' }));
     parts.push(mk('rect', { x: p.x - s / 2, y: p.y - s / 2, width: s, height: s, fill: noiseColor(n.noise) }));
@@ -612,7 +724,7 @@ function datos(target, pairs) {
 function renderHero(state) {
   const s = state.self;
   const total = state.nodes.length + 1;
-  $('#hero-name').textContent = s.name;
+  $('#hero-name').textContent = `${app.me.name} @ ${s.name}`;
   const rec = state.rec.active ? ` · ● grabando ${Math.floor(state.rec.ms / 1000)} s` : '';
   $('#hero-net').textContent = `${total} nodo${total > 1 ? 's' : ''} · ${s.links.length} vecino${s.links.length === 1 ? '' : 's'}${rec}`;
   const meter = $('#hero-noise');
@@ -647,13 +759,23 @@ function renderNodes(state) {
     if (i > 0) li.append(dmButton(n.id));
     return li;
   });
+  // Celus en la red, con su placa.
+  for (const k of (state.known || []).filter((n) => n.client && n.alive && n.id !== app.me.id)) {
+    const li = el('li', 'celu');
+    li.append(el('span', 'when', 'celu'));
+    const name = el('span', 'name', `${k.name} `);
+    name.append(el('small', '', `@ ${knownName(k.parent)}`));
+    li.append(name, dmButton(k.id));
+    rows.push(li);
+  }
   // Los que conocemos pero no están: se les puede escribir igual y les llega
   // cuando vuelvan.
-  for (const k of (state.known || []).filter((n) => !n.alive)) {
+  for (const k of (state.known || []).filter((n) => !n.alive && n.id !== app.me.id)) {
     const li = el('li', 'off');
     li.append(el('span', 'when', 'fuera'));
     const name = el('span', 'name', `${k.name} `);
-    name.append(el('small', '', k.seen ? `· visto hace ${ago(k.age)}` : '· del historial'));
+    const where = k.client ? ` @ ${knownName(k.parent)}` : '';
+    name.append(el('small', '', (k.seen ? `· visto hace ${ago(k.age)}` : '· del historial') + where));
     li.append(name, dmButton(k.id));
     rows.push(li);
   }
@@ -663,6 +785,7 @@ function renderNodes(state) {
 function renderSelf(state) {
   const s = state.self;
   const caps = [s.flags & 1 ? 'pantalla' : null, s.flags & 2 ? 'PSRAM 8 MB' : null].filter(Boolean).join(', ') || '—';
+  datos('#me', [['Nombre', app.me.name], ['ID', app.me.id.toUpperCase()], ['Placa', `${s.name} · ${s.id.toUpperCase()}`]]);
   datos('#self', [
     ['Nombre', s.name], ['ID', s.id], ['Prendido', ago(s.up)], ['Hardware', caps], ['Ruido', `${s.noise} / 100`],
   ]);
@@ -680,6 +803,7 @@ function renderSelf(state) {
 async function pollState() {
   try {
     const state = await api('/api/state');
+    app.known = (state.known || []).filter((k) => k.id !== app.me.id);
     renderHero(state);
     renderNodes(state);
     renderSelf(state);
@@ -705,6 +829,7 @@ function setupTabs() {
   }
 }
 
+loadMe();
 setupTabs();
 setupAlertButtons();
 setupForms();
