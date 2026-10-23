@@ -17,9 +17,10 @@ ESP_EVENT_DEFINE_BASE(PRESENCE_EVENT);
 #define BEACON_PERIOD_MS  3000
 #define BEACON_JITTER_MS  500
 #define NODE_TIMEOUT_MS   (4 * BEACON_PERIOD_MS)
-#define MAX_NODES         24
+#define MAX_NODES         PRESENCE_MAX_KNOWN
 #define NVS_NAMESPACE     "presence"
 #define NVS_KEY_NAME      "name"
+#define NVS_KEY_KNOWN     "known"
 
 typedef struct __attribute__((packed)) {
     uint32_t id;
@@ -41,7 +42,14 @@ _Static_assert(sizeof(wire_beacon_t) <= MESH_PAYLOAD_MAX, "beacon does not fit i
 typedef struct {
     presence_node_t node;
     uint32_t last_seen_ms;
+    bool seen;  // recibimos un beacon en este arranque (si no, viene del historial en NVS)
 } entry_t;
+
+// Lo que se guarda del historial: quien es y como se llama.
+typedef struct __attribute__((packed)) {
+    uint32_t id;
+    char name[PRESENCE_NAME_MAX];
+} known_record_t;
 
 static presence_config_t s_cfg;
 static char s_name[PRESENCE_NAME_MAX + 1];
@@ -61,6 +69,54 @@ static void load_name(void)
         }
         nvs_close(nvs);
     }
+}
+
+static bool is_alive(const entry_t *e, uint32_t now)
+{
+    return e->seen && now - e->last_seen_ms < NODE_TIMEOUT_MS;
+}
+
+// Historial de nodos conocidos en NVS, para poder escribirles aunque esten
+// fuera de alcance o despues de un reinicio.
+static void load_known(void)
+{
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
+        return;
+    }
+    static known_record_t records[MAX_NODES];
+    size_t len = sizeof(records);
+    if (nvs_get_blob(nvs, NVS_KEY_KNOWN, records, &len) == ESP_OK) {
+        s_count = len / sizeof(known_record_t);
+        for (int i = 0; i < s_count; i++) {
+            memset(&s_nodes[i], 0, sizeof(s_nodes[i]));
+            s_nodes[i].node.id = records[i].id;
+            memcpy(s_nodes[i].node.name, records[i].name, PRESENCE_NAME_MAX);
+            s_nodes[i].node.name[PRESENCE_NAME_MAX] = '\0';
+        }
+    }
+    nvs_close(nvs);
+}
+
+static void save_known(void)
+{
+    static known_record_t records[MAX_NODES];
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    const int count = s_count;
+    for (int i = 0; i < count; i++) {
+        records[i].id = s_nodes[i].node.id;
+        memcpy(records[i].name, s_nodes[i].node.name, PRESENCE_NAME_MAX);
+    }
+    xSemaphoreGive(s_lock);
+
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+        return;
+    }
+    if (nvs_set_blob(nvs, NVS_KEY_KNOWN, records, count * sizeof(known_record_t)) == ESP_OK) {
+        nvs_commit(nvs);
+    }
+    nvs_close(nvs);
 }
 
 static void fill_links(presence_node_t *node)
@@ -125,6 +181,8 @@ static entry_t *find_or_add(mesh_node_id_t id, bool *added)
     if (s_count < MAX_NODES) {
         slot = &s_nodes[s_count++];
     } else {
+        // Pisa al que hace mas que no escuchamos (los del historial que no
+        // aparecieron en este arranque tienen last_seen_ms = 0).
         slot = &s_nodes[0];
         for (int i = 1; i < s_count; i++) {
             if (s_nodes[i].last_seen_ms < slot->last_seen_ms) {
@@ -149,15 +207,20 @@ static void on_beacon(const mesh_rx_meta_t *meta, const void *payload, size_t le
         return;
     }
 
+    const uint32_t now = mesh_now_ms();
     xSemaphoreTake(s_lock, portMAX_DELAY);
     bool added;
     entry_t *e = find_or_add(meta->origin, &added);
     presence_node_t *n = &e->node;
-    // Se avisa como nuevo si no lo teniamos o si se habia caido.
-    const bool was_alive = !added && mesh_now_ms() - e->last_seen_ms < NODE_TIMEOUT_MS;
+    // Se avisa como nuevo si no lo teniamos, si se habia caido o si viene del
+    // historial y es la primera vez que aparece en este arranque.
+    const bool was_alive = !added && is_alive(e, now);
+    const bool renamed = added || strncmp(n->name, b.name, PRESENCE_NAME_MAX) != 0;
     n->id = meta->origin;
     memcpy(n->name, b.name, PRESENCE_NAME_MAX);
     n->name[PRESENCE_NAME_MAX] = '\0';
+    char name[PRESENCE_NAME_MAX + 1];
+    strlcpy(name, n->name, sizeof(name));
     n->flags = b.flags;
     n->noise = b.noise;
     n->noise_peak = b.noise_peak;
@@ -167,11 +230,15 @@ static void on_beacon(const mesh_rx_meta_t *meta, const void *payload, size_t le
     for (int i = 0; i < n_links; i++) {
         n->links[i] = (presence_link_t){.id = b.links[i].id, .rssi = b.links[i].rssi};
     }
-    e->last_seen_ms = mesh_now_ms();
+    e->last_seen_ms = now;
+    e->seen = true;
     xSemaphoreGive(s_lock);
 
+    if (renamed) {
+        save_known();
+    }
     if (!was_alive) {
-        ESP_LOGI(TAG, "node %s joined (%u hops)", n->name, meta->hops);
+        ESP_LOGI(TAG, "node %s joined (%u hops)", name, meta->hops);
         mesh_node_id_t id = meta->origin;
         esp_event_post(PRESENCE_EVENT, PRESENCE_EVENT_NODE_JOINED, &id, sizeof(id), 0);
     }
@@ -183,6 +250,7 @@ esp_err_t presence_init(const presence_config_t *cfg)
     s_lock = xSemaphoreCreateMutex();
     ESP_RETURN_ON_FALSE(s_lock, ESP_ERR_NO_MEM, TAG, "no mem for lock");
     load_name();
+    load_known();
     ESP_RETURN_ON_ERROR(mesh_register_handler(MESH_TYPE_PRESENCE, on_beacon, NULL), TAG, "register failed");
     ESP_RETURN_ON_FALSE(xTaskCreate(beacon_task, "presence", 3072, NULL, 4, NULL) == pdPASS, ESP_ERR_NO_MEM, TAG,
                         "task create failed");
@@ -246,13 +314,47 @@ size_t presence_nodes(presence_node_t *out, size_t max)
     size_t n = 0;
     xSemaphoreTake(s_lock, portMAX_DELAY);
     for (int i = 0; i < s_count && n < max; i++) {
-        const uint32_t age = now - s_nodes[i].last_seen_ms;
-        if (age < NODE_TIMEOUT_MS) {
+        if (is_alive(&s_nodes[i], now)) {
             out[n] = s_nodes[i].node;
-            out[n].age_ms = age;
+            out[n].age_ms = now - s_nodes[i].last_seen_ms;
             n++;
         }
     }
     xSemaphoreGive(s_lock);
     return n;
+}
+
+size_t presence_known(presence_known_t *out, size_t max)
+{
+    const uint32_t now = mesh_now_ms();
+    size_t n = 0;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < s_count && n < max; i++) {
+        const entry_t *e = &s_nodes[i];
+        out[n] = (presence_known_t){
+            .id = e->node.id,
+            .alive = is_alive(e, now),
+            .seen = e->seen,
+            .age_ms = e->seen ? now - e->last_seen_ms : 0,
+        };
+        strlcpy(out[n].name, e->node.name, sizeof(out[n].name));
+        n++;
+    }
+    xSemaphoreGive(s_lock);
+    return n;
+}
+
+bool presence_is_alive(mesh_node_id_t id)
+{
+    const uint32_t now = mesh_now_ms();
+    bool alive = false;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < s_count; i++) {
+        if (s_nodes[i].node.id == id) {
+            alive = is_alive(&s_nodes[i], now);
+            break;
+        }
+    }
+    xSemaphoreGive(s_lock);
+    return alive;
 }

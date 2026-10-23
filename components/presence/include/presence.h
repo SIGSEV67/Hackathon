@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -45,7 +46,8 @@ typedef struct {
     uint8_t (*noise_take_peak)(void);  // opcional
 } presence_config_t;
 
-// event_data: mesh_node_id_t del nodo nuevo.
+// event_data: mesh_node_id_t del nodo. NODE_JOINED sale cuando un nodo aparece
+// (nuevo, de vuelta despues de caerse, o del historial por primera vez).
 ESP_EVENT_DECLARE_BASE(PRESENCE_EVENT);
 typedef enum {
     PRESENCE_EVENT_NODE_JOINED,
@@ -68,3 +70,19 @@ void presence_self(presence_node_t *out);
 
 // Nodos remotos vivos. Devuelve cuantos copio.
 size_t presence_nodes(presence_node_t *out, size_t max);
+
+// Historial: todos los nodos que conocemos (vivos o no), con su ultimo nombre.
+// Se guarda en NVS, asi que sobrevive a un reinicio.
+typedef struct {
+    mesh_node_id_t id;
+    char name[PRESENCE_NAME_MAX + 1];
+    bool alive;      // escuchamos su beacon hace poco
+    bool seen;       // lo escuchamos en este arranque (si no, solo esta en el historial)
+    uint32_t age_ms; // hace cuanto (si seen)
+} presence_known_t;
+
+#define PRESENCE_MAX_KNOWN 32
+
+size_t presence_known(presence_known_t *out, size_t max);
+
+bool presence_is_alive(mesh_node_id_t id);
