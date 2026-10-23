@@ -1,0 +1,25 @@
+menu "SIGSEV: ranging"
+
+    config SIGSEV_RANGING_FTM_OFFSET_CM
+        int "FTM distance offset (cm)"
+        range -10000 10000
+        default 0
+        help
+            Subtracted from every FTM measurement. Calibrate it by putting two
+            boards at a known distance (say 1 m) and setting this to the
+            measured distance minus the real one.
+
+    config SIGSEV_RANGING_RSSI_AT_1M
+        int "RSSI at 1 m (dBm), for the RSSI estimate"
+        range -90 -10
+        default -45
+
+    config SIGSEV_RANGING_PATH_LOSS_X10
+        int "Path loss exponent x10, for the RSSI estimate"
+        range 15 60
+        default 27
+        help
+            2.0 is free space; 2.7 to 3.5 is typical outdoors with people around,
+            and higher indoors.
+
+endmenu

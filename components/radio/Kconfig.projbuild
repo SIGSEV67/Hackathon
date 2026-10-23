@@ -13,4 +13,14 @@ menu "SIGSEV: radio"
         range 1 10
         default 4
 
+    config SIGSEV_RADIO_FTM
+        bool "Measure distance to neighbors with WiFi FTM"
+        default y
+        depends on ESP_WIFI_FTM_ENABLE
+        help
+            Runs the radio as AP+STA: the AP answers FTM (802.11mc) requests
+            and the idle station starts them towards each neighbor. The
+            station never associates, so the channel does not move. Without
+            it, distance is estimated from RSSI only.
+
 endmenu
