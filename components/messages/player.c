@@ -45,9 +45,9 @@ static void play(uint32_t id)
     static int16_t out[MESSAGES_VOICE_BLOCK_SAMPLES * 2];
     int16_t prev = 0;
 
-    ESP_LOGI(TAG, "playing voice %" PRIu32 " (%u ms)", id, msg.voice_blocks * BLOCK_MS);
+    ESP_LOGI(TAG, "playing voice %" PRIu32 " (%u ms)", id, msg.blocks * BLOCK_MS);
     s_playing = id;
-    for (uint16_t i = 0; i < msg.voice_blocks && !s_stop; i++) {
+    for (uint16_t i = 0; i < msg.blocks && !s_stop; i++) {
         s_block = i;
         if (messages_voice_decode(id, i, pcm) != ESP_OK) {
             break;  // se borro mientras sonaba

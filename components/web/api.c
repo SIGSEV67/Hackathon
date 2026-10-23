@@ -220,8 +220,8 @@ static esp_err_t get_messages(httpd_req_t *req)
             json_str(&out, m->text);
             break;
         case MESSAGE_VOICE:
-            json_fmt(&out, ",\"blocks\":%u,\"got\":%u,\"ms\":%u", m->voice_blocks, m->voice_received,
-                     m->voice_blocks * MESSAGES_VOICE_BLOCK_SAMPLES * 1000 / MESSAGES_VOICE_SAMPLE_RATE);
+            json_fmt(&out, ",\"blocks\":%u,\"got\":%u,\"ms\":%u", m->blocks, m->blocks_received,
+                     m->blocks * MESSAGES_VOICE_BLOCK_SAMPLES * 1000 / MESSAGES_VOICE_SAMPLE_RATE);
             break;
         }
         json_raw(&out, "}");
@@ -257,7 +257,7 @@ static esp_err_t get_voice(httpd_req_t *req)
         return reply_error(req, "404 Not Found", "no such voice message");
     }
 
-    const uint32_t samples = (uint32_t)msg.voice_blocks * MESSAGES_VOICE_BLOCK_SAMPLES;
+    const uint32_t samples = (uint32_t)msg.blocks * MESSAGES_VOICE_BLOCK_SAMPLES;
     const wav_header_t h = {
         .riff = "RIFF",
         .riff_size = 36 + samples * 2,
@@ -277,7 +277,7 @@ static esp_err_t get_voice(httpd_req_t *req)
     ESP_RETURN_ON_ERROR(httpd_resp_send_chunk(req, (const char *)&h, sizeof(h)), TAG, "send failed");
 
     int16_t pcm[MESSAGES_VOICE_BLOCK_SAMPLES];
-    for (uint16_t i = 0; i < msg.voice_blocks; i++) {
+    for (uint16_t i = 0; i < msg.blocks; i++) {
         if (messages_voice_decode(id, i, pcm) != ESP_OK) {
             memset(pcm, 0, sizeof(pcm));  // el mensaje se borro a mitad: completar con silencio
         }

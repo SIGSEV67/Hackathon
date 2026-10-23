@@ -109,7 +109,7 @@ static void describe(const message_t *m, char *out, size_t len)
         snprintf(out, len, "%s", m->text);
         break;
     case MESSAGE_VOICE:
-        snprintf(out, len, "VOZ %us", m->voice_blocks * MESSAGES_VOICE_BLOCK_SAMPLES / MESSAGES_VOICE_SAMPLE_RATE);
+        snprintf(out, len, "VOZ %us", m->blocks * MESSAGES_VOICE_BLOCK_SAMPLES / MESSAGES_VOICE_SAMPLE_RATE);
         break;
     }
 }
@@ -119,7 +119,7 @@ static const char *messages_title(const ui_view_t *view)
 {
     message_t m;
     if (!audio_has_speaker() || !view->selected_msg || !messages_get(view->selected_msg, &m) ||
-        m.kind != MESSAGE_VOICE || m.voice_received < m.voice_blocks) {
+        m.kind != MESSAGE_VOICE || m.blocks_received < m.blocks) {
         return s_titles[SCREEN_MESSAGES];
     }
     uint32_t playing;

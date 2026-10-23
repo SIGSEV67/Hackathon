@@ -48,8 +48,8 @@ typedef struct {
     uint32_t received_ms;    // mesh_now_ms() local
     alert_kind_t alert;      // MESSAGE_ALERT
     char text[MESSAGES_TEXT_MAX + 1];  // MESSAGE_TEXT
-    uint16_t voice_blocks;   // MESSAGE_VOICE: bloques totales
-    uint16_t voice_received; //   bloques que llegaron
+    uint16_t blocks;   // MESSAGE_VOICE: bloques totales
+    uint16_t blocks_received; //   bloques que llegaron
 } message_t;
 
 #define MESSAGE_HOPS_SELF 0xff
