@@ -1,3 +1,5 @@
+#include <string.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "sdkconfig.h"
@@ -22,7 +24,7 @@ esp_err_t neighbors_init(void)
     return s_lock ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
-void neighbors_heard(mesh_node_id_t id, int8_t rssi)
+void neighbors_heard(mesh_node_id_t id, const uint8_t addr[6], int8_t rssi)
 {
     const uint32_t now = mesh_now_ms();
     xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -49,6 +51,7 @@ void neighbors_heard(mesh_node_id_t id, int8_t rssi)
             }
         }
         slot->id = id;
+        memcpy(slot->addr, addr, sizeof(slot->addr));
         slot->rssi = rssi;
     }
     slot->last_seen_ms = now;

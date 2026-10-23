@@ -88,7 +88,7 @@ static void handle_frame(frame_t *f)
     }
 
     const mesh_node_id_t via = id_from_addr(f->src);
-    neighbors_heard(via, f->rssi);
+    neighbors_heard(via, f->src, f->rssi);
 
     if (h.origin == s_self) {
         return;  // un vecino nos devolvio un paquete propio

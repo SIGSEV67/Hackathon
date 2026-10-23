@@ -47,6 +47,7 @@ typedef void (*mesh_handler_t)(const mesh_rx_meta_t *meta, const void *payload, 
 
 typedef struct {
     mesh_node_id_t id;
+    uint8_t addr[6];       // direccion completa en el link (ej. para medir distancia por WiFi)
     int8_t rssi;           // promedio movil
     uint32_t last_seen_ms;
 } mesh_neighbor_t;
