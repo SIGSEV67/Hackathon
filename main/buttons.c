@@ -41,7 +41,8 @@ static volatile uint32_t s_state;
 
 // El joystick esta rotado 45 grados: cada contacto queda en una diagonal fisica.
 // Direccion fisica (x a la derecha, y hacia arriba) de cada contacto, medida
-// empujando el stick: UP fisico cierra RIGHT y DOWN.
+// empujando el stick: UP fisico cierra RIGHT y DOWN. Verificado en placa
+// (23/10, las cuatro direcciones): no cambiar sin volver a probar.
 static const struct {
     int8_t x, y;
 } s_joy_dir[] = {

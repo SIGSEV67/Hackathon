@@ -55,6 +55,14 @@ Para cambiar opciones de un perfil: `idf.py menuconfig` (psram) o
 - `HACK_SPEAKER_VOLUME`: volumen del parlante (solo si está habilitado).
 - `HACK_DISPLAY_ROTATE_180`: rota el OLED.
 
+## Joystick
+
+El joystick está montado rotado: cada contacto queda en una diagonal física
+(empujar arriba cierra los contactos RIGHT y DOWN). `main/buttons.c` lo
+compensa con la tabla `s_joy_dir`, así `BTN_UP/DOWN/LEFT/RIGHT` reportan la
+dirección física. Una diagonal se reporta como dos botones. Verificado en placa;
+los GPIO de `board.h` son los contactos crudos, no las direcciones.
+
 ## Pines
 
 | Periférico             | Señal                                   | GPIO                 |
