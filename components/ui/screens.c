@@ -280,7 +280,7 @@ static mesh_node_id_t draw_network(int cursor)
     for (size_t i = first, row = 0; i < total && row < LIST_ROWS; i++, row++) {
         char line[COLS * 2 + 1], name[11];
         if (i == 0) {
-            snprintf(line, sizeof(line), "Todos     (4: voz)");
+            snprintf(line, sizeof(line), "Todos 4:voz 1:llamar");
         } else {
             const presence_known_t *k = &s_known[i - 1];
             to_ascii(k->name, name, sizeof(name));
@@ -334,6 +334,41 @@ static void draw_alert(const message_t *m)
     text_center(56, "joystick: cerrar", 1, calm);
 }
 
+static void draw_call(const call_info_t *c)
+{
+    char peer[PRESENCE_NAME_MAX + 1], line[COLS + 1];
+    presence_name_of(c->peer, peer, sizeof(peer));
+    const bool ringing = c->state == CALL_INCOMING;
+    display_clear();
+    if (ringing || c->talking) {
+        display_fill_rect(0, 0, W, H, true);  // invertido: atencion / estamos al aire
+    }
+    const bool on = !(ringing || c->talking);
+    switch (c->state) {
+    case CALL_OUTGOING:
+        text_center(4, "LLAMANDO", 2, on);
+        text_center(28, peer, 1, on);
+        text_center(54, "1: cortar", 1, on);
+        break;
+    case CALL_INCOMING:
+        text_center(4, "LLAMADA", 2, on);
+        text_center(28, peer, 1, on);
+        text_center(54, "1: atender 2: no", 1, on);
+        break;
+    case CALL_ACTIVE: {
+        const uint32_t s = (mesh_now_ms() - c->since_ms) / 1000;
+        text_center(2, peer, 1, on);
+        snprintf(line, sizeof(line), "%02" PRIu32 ":%02" PRIu32, s / 60, s % 60);
+        text_center(13, line, 1, on);
+        text_center(26, c->talking ? "AL AIRE" : (c->peer_talking ? "ESCUCHANDO" : "EN LINEA"), 2, on);
+        text_center(54, "4: hablar 1: colgar", 1, on);
+        break;
+    }
+    case CALL_IDLE:
+        break;
+    }
+}
+
 static void draw_box(const char *title, const char *body)
 {
     display_fill_rect(6, 14, W - 12, 36, false);
@@ -353,6 +388,12 @@ ui_pick_t screens_draw(const ui_view_t *view)
     }
     if (view->toast == TOAST_ALERT) {
         draw_alert(&view->toast_msg);
+        return keep;
+    }
+    call_info_t call;
+    call_get(&call);
+    if (call.state != CALL_IDLE) {
+        draw_call(&call);
         return keep;
     }
     ui_pick_t pick = {0};
@@ -388,6 +429,14 @@ ui_pick_t screens_draw(const ui_view_t *view)
                         : tm->kind == MESSAGE_FILE ? "ARCHIVO: ver en el celu"
                                                    : what);
         break;
+    case TOAST_CALL_END: {
+        static const char *const reasons[] = {
+            [CALL_END_NONE] = "",          [CALL_END_HANGUP] = "cortada",  [CALL_END_NO_ANSWER] = "no atendio",
+            [CALL_END_BUSY] = "ocupado",   [CALL_END_LOST] = "se perdio la senal",
+        };
+        draw_box("LLAMADA TERMINADA", reasons[view->toast_call.last_end]);
+        break;
+    }
     case TOAST_DELIVERED:
         presence_name_of(tm->dest, who, sizeof(who));
         snprintf(title, sizeof(title), "a %s", who);

@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "call.h"
 #include "messages.h"
 
 // Estado de la UI que comparten ui.c (eventos) y screens.c (dibujo).
@@ -20,6 +21,7 @@ typedef enum {
     TOAST_SENT,      // confirmacion de algo propio
     TOAST_INCOMING,  // llego un mensaje (texto o voz)
     TOAST_DELIVERED, // un privado nuestro llego a destino
+    TOAST_CALL_END,  // termino una llamada (toast_msg no se usa)
 } toast_kind_t;
 
 typedef struct {
@@ -30,6 +32,7 @@ typedef struct {
     toast_kind_t toast;
     uint32_t toast_until_ms;
     message_t toast_msg;
+    call_info_t toast_call;  // TOAST_CALL_END
 } ui_view_t;
 
 // Etiquetas de KEY1..KEY4 que paso la aplicacion (fijas despues de ui_init).

@@ -62,6 +62,23 @@ static void on_message(void *arg, esp_event_base_t base, int32_t event, void *da
     }
 }
 
+// La llamada en curso se dibuja sola (screens_draw la consulta); aca solo se
+// avisa como termino.
+static void on_call(void *arg, esp_event_base_t base, int32_t event, void *data)
+{
+    const call_info_t *info = data;
+    if (info->state != CALL_IDLE || info->last_end == CALL_END_NONE) {
+        return;
+    }
+    taskENTER_CRITICAL(&s_lock);
+    if (s_view.toast != TOAST_ALERT) {
+        s_view.toast = TOAST_CALL_END;
+        s_view.toast_call = *info;
+        s_view.toast_until_ms = mesh_now_ms() + SENT_TOAST_MS + 1000;
+    }
+    taskEXIT_CRITICAL(&s_lock);
+}
+
 static void on_button(void *arg, esp_event_base_t base, int32_t event, void *data)
 {
     if (event != BUTTONS_EVENT_PRESSED) {
@@ -164,6 +181,8 @@ esp_err_t ui_init(const ui_config_t *cfg)
                         "register messages failed");
     ESP_RETURN_ON_ERROR(esp_event_handler_register(BUTTONS_EVENT, ESP_EVENT_ANY_ID, on_button, NULL), TAG,
                         "register buttons failed");
+    ESP_RETURN_ON_ERROR(esp_event_handler_register(CALL_EVENT, CALL_EVENT_CHANGED, on_call, NULL), TAG,
+                        "register call failed");
     ESP_RETURN_ON_FALSE(xTaskCreate(draw_task, "ui", 4096, NULL, 3, NULL) == pdPASS, ESP_ERR_NO_MEM, TAG,
                         "task create failed");
     return ESP_OK;
