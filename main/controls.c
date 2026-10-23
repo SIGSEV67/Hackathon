@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "messages.h"
+#include "presence.h"
 #include "ui.h"
 
 #include "controls.h"
@@ -85,7 +86,8 @@ static void on_tap(button_id_t btn)
         call_answer();
     } else if (call.state != CALL_IDLE) {
         call_hangup();
-    } else if (ui_selected_node() != MESSAGES_TO_ALL) {
+    } else if (ui_selected_node() != MESSAGES_TO_ALL && !presence_is_client(ui_selected_node())) {
+        // A un celu no se lo llama en vivo: se le manda voz (KEY4).
         messages_voice_play_stop();
         call_dial(ui_selected_node());
     }

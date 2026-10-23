@@ -405,6 +405,20 @@ bool presence_is_local_client(mesh_node_id_t id)
     return local;
 }
 
+bool presence_is_client(mesh_node_id_t id)
+{
+    bool client = false;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < s_count; i++) {
+        if (s_nodes[i].node.id == id) {
+            client = s_nodes[i].kind == PRESENCE_KIND_CLIENT;
+            break;
+        }
+    }
+    xSemaphoreGive(s_lock);
+    return client;
+}
+
 esp_err_t presence_init(const presence_config_t *cfg)
 {
     s_cfg = *cfg;

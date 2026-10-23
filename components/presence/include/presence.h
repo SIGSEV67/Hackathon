@@ -92,6 +92,8 @@ esp_err_t presence_client_seen(mesh_node_id_t id, const char *name);
 
 // Si el cliente esta conectado a esta placa ahora.
 bool presence_is_local_client(mesh_node_id_t id);
+// Si el id es de un cliente (conectado aca o en otra placa, vivo o no).
+bool presence_is_client(mesh_node_id_t id);
 
 // Historial: todas las placas y clientes que conocemos (vivos o no), con su
 // ultimo nombre. Se guarda en NVS, asi que sobrevive a un reinicio.

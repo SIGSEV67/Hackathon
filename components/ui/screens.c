@@ -285,7 +285,13 @@ static mesh_node_id_t draw_network(int cursor)
             const presence_known_t *k = &s_known[i - 1];
             to_ascii(k->name, name, sizeof(name));
             const presence_node_t *node = k->alive ? alive_node(k->id, n_alive) : NULL;
-            if (node) {
+            if (k->kind == PRESENCE_KIND_CLIENT) {
+                // Celu: "Ana @Puesto" (de que placa cuelga), en minuscula si no esta.
+                char parent[PRESENCE_NAME_MAX + 1], pname[9];
+                presence_name_of(k->parent, parent, sizeof(parent));
+                to_ascii(parent, pname, sizeof(pname));
+                snprintf(line, sizeof(line), "%-10s@%s%s", name, pname, k->alive ? "" : " --");
+            } else if (node) {
                 snprintf(line, sizeof(line), "%-10s r%-3u %us", name, node->noise, node->hops + 1);
             } else if (k->seen) {
                 char when[8];
