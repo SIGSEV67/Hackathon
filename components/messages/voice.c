@@ -21,7 +21,7 @@ _Static_assert(AUDIO_SAMPLE_RATE_HZ == 2 * MESSAGES_VOICE_SAMPLE_RATE, "voice de
 #define MAX_BLOCKS        ((CONFIG_SIGSEV_VOICE_MAX_S * 1000 + BLOCK_MS - 1) / BLOCK_MS)
 #define MIN_BLOCKS        5   // menos de ~250 ms es un toque sin querer
 #define STOP_SETTLE_MS    40  // > un bloque del mic, para que termine el callback en curso
-#define SEND_SPACING_MS   3   // aire libre entre bloques para los reenvios de los vecinos
+#define SEND_SPACING_MS   5   // aire libre entre bloques para los reenvios de los vecinos
 #define SEND_WAIT_MS      500
 
 typedef struct __attribute__((packed)) {
