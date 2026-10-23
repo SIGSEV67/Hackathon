@@ -27,11 +27,14 @@ static const char *TAG = "audio";
 #define TONE_CHUNK_FRAMES   256
 #define MIC_CHUNK_FRAMES    256
 
+#if CONFIG_HACK_SPEAKER_ENABLE
 static i2s_chan_handle_t s_tx;
+#endif
 static i2s_chan_handle_t s_rx;
 
 static volatile int s_mic_level;
 
+#if CONFIG_HACK_SPEAKER_ENABLE
 static esp_err_t speaker_init(void)
 {
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
@@ -53,6 +56,7 @@ static esp_err_t speaker_init(void)
     ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(s_tx, &std_cfg), TAG, "tx init failed");
     return i2s_channel_enable(s_tx);
 }
+#endif
 
 static esp_err_t mic_init(void)
 {
@@ -112,11 +116,17 @@ static void mic_task(void *arg)
 
 esp_err_t audio_init(void)
 {
+#if CONFIG_HACK_SPEAKER_ENABLE
     ESP_RETURN_ON_ERROR(speaker_init(), TAG, "speaker init failed");
+#endif
     ESP_RETURN_ON_ERROR(mic_init(), TAG, "mic init failed");
     ESP_RETURN_ON_FALSE(xTaskCreate(mic_task, "mic", 4096, NULL, 5, NULL) == pdPASS, ESP_ERR_NO_MEM, TAG,
                         "mic task create failed");
+#if CONFIG_HACK_SPEAKER_ENABLE
     ESP_LOGI(TAG, "speaker (I2S1) and microphone (PDM, I2S0) ready");
+#else
+    ESP_LOGI(TAG, "microphone (PDM, I2S0) ready, speaker disabled");
+#endif
     return ESP_OK;
 }
 
@@ -127,6 +137,9 @@ int audio_mic_level(void)
 
 esp_err_t audio_play_tone(int freq_hz, int duration_ms)
 {
+#if !CONFIG_HACK_SPEAKER_ENABLE
+    return ESP_ERR_NOT_SUPPORTED;
+#else
     const int total = SAMPLE_RATE_HZ * duration_ms / 1000;
 
     const int fade = SAMPLE_RATE_HZ / 200;
@@ -162,4 +175,5 @@ esp_err_t audio_play_tone(int freq_hz, int duration_ms)
         done += n;
     }
     return ESP_OK;
+#endif
 }

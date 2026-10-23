@@ -1,7 +1,16 @@
 menu "Hackathon board demo"
 
+    config HACK_SPEAKER_ENABLE
+        bool "Enable speaker (I2S1)"
+        default n
+        help
+            Initialize the MAX98357A speaker on I2S1 (DIN=4, BCLK=5, LRCLK=6).
+            When disabled audio_play_tone() is a no-op. The PDM microphone
+            on I2S0 works either way.
+
     config HACK_SPEAKER_VOLUME
         int "Speaker volume (percent of full scale)"
+        depends on HACK_SPEAKER_ENABLE
         range 1 100
         default 25
         help
