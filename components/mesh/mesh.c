@@ -51,6 +51,7 @@ static uint16_t s_seq;
 static QueueHandle_t s_rx_queue;
 static QueueHandle_t s_tx_queue;
 static mesh_stats_t s_stats;
+static volatile bool s_started;
 
 static struct {
     mesh_handler_t fn;
@@ -176,6 +177,7 @@ esp_err_t mesh_start(void)
 {
     ESP_RETURN_ON_FALSE(s_link, ESP_ERR_INVALID_STATE, TAG, "mesh_init first");
     ESP_RETURN_ON_ERROR(s_link->start(on_link_rx, NULL), TAG, "link start failed");
+    s_started = true;
 
     char name[16];
     mesh_node_name(s_self, name, sizeof(name));
@@ -204,6 +206,9 @@ esp_err_t mesh_register_handler(mesh_type_t type, mesh_handler_t fn, void *ctx)
 
 esp_err_t mesh_send(mesh_type_t type, const void *payload, size_t len, TickType_t wait)
 {
+    if (!s_started) {
+        return ESP_ERR_INVALID_STATE;
+    }
     ESP_RETURN_ON_FALSE(len <= MESH_PAYLOAD_MAX, ESP_ERR_INVALID_SIZE, TAG, "payload too big (%u)", (unsigned)len);
 
     frame_t frame = {.len = MESH_HEADER_LEN + len, .forward = false};

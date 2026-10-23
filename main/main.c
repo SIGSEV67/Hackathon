@@ -3,15 +3,23 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 
+#include "sdkconfig.h"
+
 #include "audio.h"
+#include "board.h"
 #include "buttons.h"
 #include "display.h"
 #include "link.h"
 #include "mesh.h"
 #include "noise.h"
+#include "presence.h"
 #include "radio.h"
 
 static const char *TAG = "app";
+
+#ifndef CONFIG_SPIRAM
+#define CONFIG_SPIRAM 0
+#endif
 
 static void init_nvs(void)
 {
@@ -33,8 +41,15 @@ void app_main(void)
     ESP_ERROR_CHECK(noise_init());
 
     ESP_ERROR_CHECK(mesh_init(link_espnow()));
-    char name[16];
-    mesh_node_name(mesh_self_id(), name, sizeof(name));
+    const presence_config_t presence_cfg = {
+        .flags = (BOARD_HAS_DISPLAY ? PRESENCE_FLAG_DISPLAY : 0) | (CONFIG_SPIRAM ? PRESENCE_FLAG_PSRAM : 0),
+        .noise_level = noise_level,
+        .noise_take_peak = noise_take_peak,
+    };
+    ESP_ERROR_CHECK(presence_init(&presence_cfg));
+
+    char name[PRESENCE_NAME_MAX + 1];
+    presence_self_name(name, sizeof(name));
     ESP_ERROR_CHECK(radio_init(name));
     ESP_ERROR_CHECK(mesh_start());
 

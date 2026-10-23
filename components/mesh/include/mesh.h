@@ -72,6 +72,7 @@ esp_err_t mesh_register_handler(mesh_type_t type, mesh_handler_t fn, void *ctx);
 
 // Manda un paquete propio a toda la mesh. Espera hasta `wait` si la cola de
 // salida esta llena (util para mandar rafagas, ej. un mensaje de voz).
+// Antes de mesh_start devuelve ESP_ERR_INVALID_STATE.
 esp_err_t mesh_send(mesh_type_t type, const void *payload, size_t len, TickType_t wait);
 
 // Copia los vecinos directos vivos a `out`. Devuelve cuantos copio.
