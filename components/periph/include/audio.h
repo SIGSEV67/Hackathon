@@ -45,4 +45,9 @@ bool audio_has_speaker(void);
 // de menuconfig aplicado. Bloquea hasta que entra en el buffer de DMA.
 esp_err_t audio_speaker_write(const int16_t *samples, size_t count, uint32_t timeout_ms);
 
+// Igual, para voz a la mitad de la frecuencia (8 kHz): interpola a
+// AUDIO_SAMPLE_RATE_HZ. `prev` guarda la ultima muestra entre llamadas para que
+// no haya un salto en la union (empezar en 0).
+esp_err_t audio_speaker_write_8k(const int16_t *samples, size_t count, int16_t *prev, uint32_t timeout_ms);
+
 esp_err_t audio_play_tone(int freq_hz, int duration_ms);

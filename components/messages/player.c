@@ -14,8 +14,6 @@
 
 static const char *TAG = "player";
 
-_Static_assert(AUDIO_SAMPLE_RATE_HZ == 2 * MESSAGES_VOICE_SAMPLE_RATE, "player upsamples by 2");
-
 #define BLOCK_MS (MESSAGES_VOICE_BLOCK_SAMPLES * 1000 / MESSAGES_VOICE_SAMPLE_RATE)
 
 static TaskHandle_t s_task;
@@ -24,17 +22,6 @@ static volatile uint32_t s_playing;   // id que esta sonando (0 = nada)
 static volatile uint16_t s_block;     // bloque en curso
 static volatile bool s_stop;
 
-// 8 kHz -> 16 kHz interpolando entre muestras. `prev` es la ultima muestra del
-// bloque anterior, para que no haya un salto en la union.
-static void upsample(const int16_t *in, int16_t *out, int16_t *prev)
-{
-    for (int i = 0; i < MESSAGES_VOICE_BLOCK_SAMPLES; i++) {
-        out[2 * i] = (int16_t)((*prev + in[i]) / 2);
-        out[2 * i + 1] = in[i];
-        *prev = in[i];
-    }
-}
-
 static void play(uint32_t id)
 {
     message_t msg;
@@ -42,7 +29,6 @@ static void play(uint32_t id)
         return;
     }
     static int16_t pcm[MESSAGES_VOICE_BLOCK_SAMPLES];
-    static int16_t out[MESSAGES_VOICE_BLOCK_SAMPLES * 2];
     int16_t prev = 0;
 
     ESP_LOGI(TAG, "playing voice %" PRIu32 " (%u ms)", id, msg.blocks * BLOCK_MS);
@@ -52,14 +38,13 @@ static void play(uint32_t id)
         if (messages_voice_decode(id, i, pcm) != ESP_OK) {
             break;  // se borro mientras sonaba
         }
-        upsample(pcm, out, &prev);
-        if (audio_speaker_write(out, sizeof(out) / sizeof(out[0]), 1000) != ESP_OK) {
+        if (audio_speaker_write_8k(pcm, MESSAGES_VOICE_BLOCK_SAMPLES, &prev, 1000) != ESP_OK) {
             break;
         }
     }
     // Un poco de silencio para vaciar el DMA sin cortar la ultima palabra.
-    memset(out, 0, sizeof(out));
-    audio_speaker_write(out, sizeof(out) / sizeof(out[0]), 1000);
+    memset(pcm, 0, sizeof(pcm));
+    audio_speaker_write_8k(pcm, MESSAGES_VOICE_BLOCK_SAMPLES, &prev, 1000);
     s_playing = 0;
     messages_notify(MESSAGES_EVENT_PLAY_STOPPED, id);
 }

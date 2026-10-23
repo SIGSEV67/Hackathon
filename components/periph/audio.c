@@ -222,6 +222,23 @@ esp_err_t audio_speaker_write(const int16_t *samples, size_t count, uint32_t tim
 #endif
 }
 
+esp_err_t audio_speaker_write_8k(const int16_t *samples, size_t count, int16_t *prev, uint32_t timeout_ms)
+{
+    int16_t up[SPEAKER_CHUNK_FRAMES];
+    for (size_t done = 0; done < count;) {
+        const size_t n = count - done < SPEAKER_CHUNK_FRAMES / 2 ? count - done : SPEAKER_CHUNK_FRAMES / 2;
+        for (size_t i = 0; i < n; i++) {
+            const int16_t x = samples[done + i];
+            up[2 * i] = (int16_t)((*prev + x) / 2);
+            up[2 * i + 1] = x;
+            *prev = x;
+        }
+        ESP_RETURN_ON_ERROR(audio_speaker_write(up, 2 * n, timeout_ms), TAG, "speaker write failed");
+        done += n;
+    }
+    return ESP_OK;
+}
+
 esp_err_t audio_play_tone(int freq_hz, int duration_ms)
 {
 #if !CONFIG_HACK_SPEAKER_ENABLE
