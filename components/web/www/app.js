@@ -8,6 +8,7 @@ const MESSAGES_MS = 1500;
 const HOLD_MS = 900;
 const NEW_FOR_S = 30;
 const ALERT_LABELS = ['SOS', 'MÉDICO', 'PELIGRO', 'ESTOY BIEN'];
+const VOICE_RATE = 8000;  // lo que viaja por la mesh (MESSAGES_VOICE_SAMPLE_RATE)
 
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, cls, text) => {
@@ -24,6 +25,7 @@ const app = {
   playing: null,  // id del mensaje de voz que está sonando o cargando
   known: [],      // historial de nodos (para elegir el destino de un privado)
   pending: new Set(),  // privados propios todavía sin confirmar
+  voiceMaxS: 20,
 };
 
 // --- API -----------------------------------------------------------------------
@@ -257,8 +259,75 @@ function recipientName(id) {
   return k ? k.name : id.toUpperCase();
 }
 
+// --- audio desde el celular --------------------------------------------------------------
+// El navegador solo da el micrófono (getUserMedia) en HTTPS y el portal es HTTP,
+// así que se usa el grabador del sistema (<input capture>) y Web Audio, que sí
+// anda en HTTP, para decodificar lo que devuelve (m4a, webm, ogg, wav...).
+
+function decodeAudio(buf) {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  const ctx = new Ctx();
+  // Safari viejo solo tiene la versión con callbacks.
+  return new Promise((resolve, reject) => ctx.decodeAudioData(buf, resolve, reject))
+    .finally(() => ctx.close && ctx.close());
+}
+
+// Mezcla a mono, baja a 8 kHz promediando (filtro anti-alias simple), recorta
+// al largo máximo y normaliza, para aprovechar los bits del ADPCM.
+function toVoicePcm(audio, maxS) {
+  const chans = [...Array(audio.numberOfChannels).keys()].map((c) => audio.getChannelData(c));
+  const ratio = audio.sampleRate / VOICE_RATE;
+  const n = Math.min(Math.floor(audio.length / ratio), maxS * VOICE_RATE);
+  const out = new Float32Array(n);
+  let peak = 1e-4;
+  for (let i = 0; i < n; i++) {
+    const a = Math.floor(i * ratio), b = Math.max(a + 1, Math.floor((i + 1) * ratio));
+    let sum = 0;
+    for (const ch of chans) for (let j = a; j < b; j++) sum += ch[j];
+    out[i] = sum / ((b - a) * chans.length);
+    peak = Math.max(peak, Math.abs(out[i]));
+  }
+  const gain = Math.min(0.8 / peak, 20);
+  const pcm = new Int16Array(n);
+  for (let i = 0; i < n; i++) pcm[i] = Math.max(-32768, Math.min(32767, Math.round(out[i] * gain * 32767)));
+  return pcm;
+}
+
+async function sendAudioFile(file) {
+  let to;
+  try {
+    to = resolveRecipient();
+  } catch (e) { banner(`Destino inválido: ${e.message}`); return; }
+  const button = $('#rec-btn');
+  button.disabled = true;
+  button.textContent = 'Procesando…';
+  try {
+    const audio = await decodeAudio(await file.arrayBuffer());
+    const pcm = toVoicePcm(audio, app.voiceMaxS);
+    if (pcm.length < VOICE_RATE / 4) throw new Error('muy corto');
+    button.textContent = 'Enviando…';
+    await api(to ? `/api/voice?to=${to}` : '/api/voice', {
+      method: 'POST', body: pcm.buffer, headers: { 'Content-Type': 'application/octet-stream' },
+    });
+    const cut = audio.duration > app.voiceMaxS ? ` (recortado a ${app.voiceMaxS} s)` : '';
+    banner(to ? `Audio privado para ${recipientName(to)}: en camino${cut}` : `Audio enviado${cut}`, true);
+    pollMessages();
+  } catch (e) {
+    banner(`No se pudo mandar el audio (${e.message || 'formato no soportado'})`);
+  } finally {
+    button.disabled = false;
+    button.textContent = '● Grabar audio';
+  }
+}
+
 function setupForms() {
   $('#to').addEventListener('change', updateComposeMode);
+  $('#rec-btn').addEventListener('click', () => $('#rec-file').click());
+  $('#rec-file').addEventListener('change', (ev) => {
+    const file = ev.target.files[0];
+    ev.target.value = '';  // para poder elegir el mismo archivo de nuevo
+    if (file) sendAudioFile(file);
+  });
   $('#compose').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const input = $('#text');
@@ -463,6 +532,7 @@ async function pollState() {
     renderNodes(state);
     renderSelf(state);
     renderRecipients(state);
+    if (state.voice_max_s) app.voiceMaxS = state.voice_max_s;
     updateMap(state);
   } catch (e) {
     $('#hero-net').textContent = 'sin conexión con el nodo…';

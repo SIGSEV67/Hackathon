@@ -82,6 +82,9 @@ h2 { margin: 30px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--li
 .btn { background: var(--bright); color: var(--bg); border: 1px solid var(--bright); padding: 10px 16px;
        font-weight: 800; letter-spacing: 1px; cursor: pointer; }
 .btn:hover, .btn:focus-visible { background: var(--bg); color: var(--bright); }
+.btn.ghost { flex: 1; background: none; color: var(--bright); border-color: var(--gold); }
+.btn.ghost:hover, .btn.ghost:focus-visible { background: var(--gold); color: var(--bg); }
+.btn:disabled { opacity: .5; cursor: default; }
 
 .alerts { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); border: 1px solid var(--line); }
 .alert-btn { position: relative; overflow: hidden; height: 76px; border: 0; cursor: pointer; background: var(--bg);

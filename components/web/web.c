@@ -92,7 +92,7 @@ esp_err_t web_init(void)
     esp_log_level_set("httpd_uri", ESP_LOG_ERROR);
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.max_uri_handlers = 16;
+    cfg.max_uri_handlers = 24;
     cfg.stack_size = 6144;
     cfg.lru_purge_enable = true;  // los telefonos abren muchas conexiones y no las cierran
     httpd_handle_t server;

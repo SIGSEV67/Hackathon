@@ -5,12 +5,14 @@
 //   POST /api/alert?kind=N      manda una alerta (alert_kind_t)
 //   POST /api/text?to=ID        manda el body como texto (to = id de 8 hex: privado)
 //   POST /api/name              renombra este nodo con el body
+//   POST /api/voice?to=ID       manda el body (PCM 16 bits mono, 8 kHz) como voz
 
 #include <stdlib.h>
 #include <string.h>
 
 #include "esp_check.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
 
 #include "api.h"
 #include "json_out.h"
@@ -155,7 +157,8 @@ static esp_err_t get_state(httpd_req_t *req)
                  known[i].seen ? "true" : "false", known[i].age_ms / 1000);
     }
     free(known);
-    json_fmt(&out, "],\"transit\":%u}", (unsigned)messages_transit_count());
+    json_fmt(&out, "],\"transit\":%u,\"voice_max_s\":%d}", (unsigned)messages_transit_count(),
+             CONFIG_SIGSEV_VOICE_MAX_S);
     return json_end(&out);
 }
 
@@ -285,6 +288,33 @@ static esp_err_t get_voice(httpd_req_t *req)
 
 // --- POST ------------------------------------------------------------------------
 
+// Lee exactamente len bytes del body.
+static bool recv_exact(httpd_req_t *req, void *buf, size_t len)
+{
+    size_t got = 0;
+    while (got < len) {
+        const int n = httpd_req_recv(req, (char *)buf + got, len - got);
+        if (n == HTTPD_SOCK_ERR_TIMEOUT) {
+            continue;
+        }
+        if (n <= 0) {
+            return false;
+        }
+        got += n;
+    }
+    return true;
+}
+
+static bool query_dest(httpd_req_t *req, mesh_node_id_t *out)
+{
+    long long to = MESSAGES_TO_ALL;
+    if (query_num(req, "to", 16, &to) && (to < 0 || to > UINT32_MAX || to == mesh_self_id())) {
+        return false;
+    }
+    *out = (mesh_node_id_t)to;
+    return true;
+}
+
 static esp_err_t post_alert(httpd_req_t *req)
 {
     long kind;
@@ -299,16 +329,56 @@ static esp_err_t post_alert(httpd_req_t *req)
 
 static esp_err_t post_text(httpd_req_t *req)
 {
-    long long to = MESSAGES_TO_ALL;
-    if (query_num(req, "to", 16, &to) && (to < 0 || to > UINT32_MAX || to == mesh_self_id())) {
+    mesh_node_id_t to;
+    if (!query_dest(req, &to)) {
         return reply_error(req, "400 Bad Request", "bad destination");
     }
     char text[MESSAGES_TEXT_MAX + 1];
     if (read_body(req, text, sizeof(text)) <= 0) {
         return reply_error(req, "400 Bad Request", "text must be 1-160 bytes");
     }
-    if (messages_send_text((mesh_node_id_t)to, text) != ESP_OK) {
+    if (messages_send_text(to, text) != ESP_OK) {
         return reply_error(req, "503 Service Unavailable", "mesh busy");
+    }
+    return reply_ok(req);
+}
+
+static esp_err_t post_voice(httpd_req_t *req)
+{
+    mesh_node_id_t to;
+    if (!query_dest(req, &to)) {
+        return reply_error(req, "400 Bad Request", "bad destination");
+    }
+    const uint32_t samples = req->content_len / sizeof(int16_t);
+    uint32_t id;
+    if (samples == 0 || messages_voice_import_begin(to, samples, &id) != ESP_OK) {
+        return reply_error(req, "503 Service Unavailable", "no room for voice");
+    }
+
+    // Lo que pase del largo maximo se lee y se descarta.
+    static int16_t pcm[MESSAGES_VOICE_BLOCK_SAMPLES];  // un solo task de httpd
+    bool ok = true;
+    for (uint32_t left = samples; left > 0 && ok;) {
+        const uint32_t n = left < MESSAGES_VOICE_BLOCK_SAMPLES ? left : MESSAGES_VOICE_BLOCK_SAMPLES;
+        memset(pcm, 0, sizeof(pcm));
+        ok = recv_exact(req, pcm, n * sizeof(int16_t));
+        left -= n;
+        if (ok && messages_voice_import_block(id, pcm) != ESP_OK) {
+            // Ya no entra (largo maximo o memoria): drenar el resto del body.
+            while (ok && left > 0) {
+                const uint32_t m = left < MESSAGES_VOICE_BLOCK_SAMPLES ? left : MESSAGES_VOICE_BLOCK_SAMPLES;
+                ok = recv_exact(req, pcm, m * sizeof(int16_t));
+                left -= m;
+            }
+            break;
+        }
+    }
+    const esp_err_t err = messages_voice_import_end(id, ok);
+    if (!ok) {
+        return reply_error(req, "400 Bad Request", "upload cut");
+    }
+    if (err != ESP_OK) {
+        return reply_error(req, "400 Bad Request", "voice too short");
     }
     return reply_ok(req);
 }
@@ -331,6 +401,7 @@ esp_err_t api_register(httpd_handle_t server)
         {.uri = "/api/alert", .method = HTTP_POST, .handler = post_alert},
         {.uri = "/api/text", .method = HTTP_POST, .handler = post_text},
         {.uri = "/api/name", .method = HTTP_POST, .handler = post_name},
+        {.uri = "/api/voice", .method = HTTP_POST, .handler = post_voice},
     };
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
         ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &uris[i]), TAG, "register %s failed", uris[i].uri);
