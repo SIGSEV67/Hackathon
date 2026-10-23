@@ -32,6 +32,7 @@ void display_set_pixel(int x, int y, bool on) {}
 void display_fill_rect(int x, int y, int w, int h, bool on) {}
 void display_draw_rect(int x, int y, int w, int h) {}
 void display_text(int x, int y, const char *str, bool invert) {}
+void display_text_scaled(int x, int y, const char *str, int scale, bool on) {}
 esp_err_t display_flush(void) { return ESP_ERR_NOT_SUPPORTED; }
 
 #else
@@ -278,6 +279,24 @@ void display_text(int x, int y, const char *str, bool invert)
     }
     for (int i = 0; i < len; i++) {
         draw_char(x + i * DISPLAY_FONT_W, y, str[i], !invert);
+    }
+}
+
+void display_text_scaled(int x, int y, const char *str, int scale, bool on)
+{
+    for (; *str; str++, x += DISPLAY_FONT_W * scale) {
+        char c = *str;
+        if (c < 32 || c > 126) {
+            c = '?';
+        }
+        const uint8_t *glyph = s_font[c - 32];
+        for (int col = 0; col < 5; col++) {
+            for (int row = 0; row < 8; row++) {
+                if (glyph[col] & (1u << row)) {
+                    display_fill_rect(x + col * scale, y + row * scale, scale, scale, on);
+                }
+            }
+        }
     }
 }
 
