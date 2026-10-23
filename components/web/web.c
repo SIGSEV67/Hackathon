@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -12,7 +13,7 @@
 
 static const char *TAG = "web";
 
-// Archivos de www/, embebidos en el firmware (EMBED_TXTFILES les agrega un \0).
+// Archivos de www/, embebidos en el firmware.
 #define EMBEDDED(name)                                                    \
     extern const char _binary_##name##_start[] asm("_binary_" #name "_start"); \
     extern const char _binary_##name##_end[] asm("_binary_" #name "_end")
@@ -20,16 +21,32 @@ static const char *TAG = "web";
 EMBEDDED(index_html);
 EMBEDDED(app_js);
 EMBEDDED(style_css);
+EMBEDDED(silkscreen_400_woff2);
+EMBEDDED(silkscreen_700_woff2);
 
 typedef struct {
     const char *start;
     const char *end;
     const char *type;
+    bool text;       // EMBED_TXTFILES agrega un \0 al final que no se manda
+    bool immutable;  // las fuentes no cambian: que el telefono las cachee
 } asset_t;
 
-static const asset_t s_index = {_binary_index_html_start, _binary_index_html_end, "text/html; charset=utf-8"};
-static const asset_t s_app = {_binary_app_js_start, _binary_app_js_end, "text/javascript; charset=utf-8"};
-static const asset_t s_style = {_binary_style_css_start, _binary_style_css_end, "text/css; charset=utf-8"};
+#define ASSET(name, mime, is_text, is_immutable) \
+    {_binary_##name##_start, _binary_##name##_end, mime, is_text, is_immutable}
+
+static const asset_t s_assets[] = {
+    ASSET(index_html, "text/html; charset=utf-8", true, false),
+    ASSET(app_js, "text/javascript; charset=utf-8", true, false),
+    ASSET(style_css, "text/css; charset=utf-8", true, false),
+    ASSET(silkscreen_400_woff2, "font/woff2", false, true),
+    ASSET(silkscreen_700_woff2, "font/woff2", false, true),
+};
+static const char *const s_asset_uris[] = {
+    "/", "/app.js", "/style.css", "/fonts/silkscreen-400.woff2", "/fonts/silkscreen-700.woff2",
+};
+_Static_assert(sizeof(s_assets) / sizeof(s_assets[0]) == sizeof(s_asset_uris) / sizeof(s_asset_uris[0]),
+               "one uri per asset");
 
 static char s_portal_url[32];
 
@@ -37,8 +54,8 @@ static esp_err_t get_asset(httpd_req_t *req)
 {
     const asset_t *a = req->user_ctx;
     httpd_resp_set_type(req, a->type);
-    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
-    return httpd_resp_send(req, a->start, a->end - a->start - 1);
+    httpd_resp_set_hdr(req, "Cache-Control", a->immutable ? "public, max-age=31536000, immutable" : "no-cache");
+    return httpd_resp_send(req, a->start, a->end - a->start - (a->text ? 1 : 0));
 }
 
 // Cualquier otra URL (incluidos los chequeos de conectividad de Android, iOS y
@@ -81,14 +98,14 @@ esp_err_t web_init(void)
     httpd_handle_t server;
     ESP_RETURN_ON_ERROR(httpd_start(&server, &cfg), TAG, "httpd start failed");
 
-    const httpd_uri_t assets[] = {
-        {.uri = "/", .method = HTTP_GET, .handler = get_asset, .user_ctx = (void *)&s_index},
-        {.uri = "/app.js", .method = HTTP_GET, .handler = get_asset, .user_ctx = (void *)&s_app},
-        {.uri = "/style.css", .method = HTTP_GET, .handler = get_asset, .user_ctx = (void *)&s_style},
-    };
-    for (size_t i = 0; i < sizeof(assets) / sizeof(assets[0]); i++) {
-        ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &assets[i]), TAG, "register %s failed",
-                            assets[i].uri);
+    for (size_t i = 0; i < sizeof(s_assets) / sizeof(s_assets[0]); i++) {
+        const httpd_uri_t uri = {
+            .uri = s_asset_uris[i],
+            .method = HTTP_GET,
+            .handler = get_asset,
+            .user_ctx = (void *)&s_assets[i],
+        };
+        ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &uri), TAG, "register %s failed", uri.uri);
     }
     ESP_RETURN_ON_ERROR(api_register(server), TAG, "api register failed");
     ESP_RETURN_ON_ERROR(httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, redirect_to_portal), TAG,

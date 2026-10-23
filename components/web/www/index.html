@@ -8,67 +8,104 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<header class="top">
-  <div class="brand">
-    <span class="logo">SIGSEV</span>
-    <span class="tag">red mesh sin internet</span>
-  </div>
-  <div class="status" id="status">conectando…</div>
-</header>
+<main class="page">
 
-<div class="banner" id="banner" hidden></div>
+  <header class="hero">
+    <div class="hero-body">
+      <p class="kicker">Red mesh · sin internet</p>
+      <h1>SIGSEV</h1>
+      <ul class="datos">
+        <li><span class="k">Nodo</span><span id="hero-name">conectando…</span></li>
+        <li><span class="k">Red</span><span id="hero-net">—</span></li>
+        <li><span class="k">Ruido</span><span class="meter"><i id="hero-noise"></i></span></li>
+      </ul>
+    </div>
+    <svg class="hero-art" viewBox="0 0 120 90" aria-hidden="true">
+      <g class="art-links">
+        <line x1="20" y1="22" x2="62" y2="16"/><line x1="62" y1="16" x2="100" y2="38"/>
+        <line x1="20" y1="22" x2="42" y2="62"/><line x1="42" y1="62" x2="100" y2="38"/>
+        <line x1="42" y1="62" x2="88" y2="76"/><line x1="100" y1="38" x2="88" y2="76"/>
+      </g>
+      <g class="art-nodes">
+        <rect x="15" y="17" width="10" height="10"/><rect x="57" y="11" width="10" height="10"/>
+        <rect x="95" y="33" width="10" height="10"/><rect x="37" y="57" width="10" height="10"/>
+        <rect x="83" y="71" width="10" height="10"/>
+      </g>
+      <rect class="art-ping" x="37" y="57" width="10" height="10"/>
+    </svg>
+  </header>
 
-<nav class="tabs" role="tablist">
-  <button role="tab" aria-selected="true" data-tab="feed">Alertas</button>
-  <button role="tab" aria-selected="false" data-tab="map">Red</button>
-  <button role="tab" aria-selected="false" data-tab="node">Nodo</button>
-</nav>
+  <ul class="stats">
+    <li><span class="num" id="stat-nodes">–</span><span class="label">nodos</span></li>
+    <li><span class="num" id="stat-links">–</span><span class="label">vecinos</span></li>
+    <li><span class="num" id="stat-msgs">–</span><span class="label">mensajes</span></li>
+  </ul>
 
-<main>
+  <div class="banner" id="banner" hidden></div>
+
+  <nav class="indice" role="tablist" aria-label="Secciones">
+    <button role="tab" aria-selected="true" data-tab="feed">Alertas</button>
+    <button role="tab" aria-selected="false" data-tab="map">Red</button>
+    <button role="tab" aria-selected="false" data-tab="node">Nodo</button>
+  </nav>
+
   <section id="tab-feed" class="tab">
-    <p class="hint">Mantené apretado para mandar a toda la red.</p>
+    <h2>Avisar a todos</h2>
+    <p class="nota">Mantené apretado un segundo: llega a cada nodo de la red.</p>
     <div class="alerts">
       <button class="alert-btn sos" data-kind="0"><span>SOS</span><i></i></button>
-      <button class="alert-btn medic" data-kind="1"><span>MÉDICO</span><i></i></button>
-      <button class="alert-btn danger" data-kind="2"><span>PELIGRO</span><i></i></button>
-      <button class="alert-btn safe" data-kind="3"><span>ESTOY BIEN</span><i></i></button>
+      <button class="alert-btn medic" data-kind="1"><span>Médico</span><i></i></button>
+      <button class="alert-btn danger" data-kind="2"><span>Peligro</span><i></i></button>
+      <button class="alert-btn safe" data-kind="3"><span>Estoy bien</span><i></i></button>
     </div>
 
     <form class="compose" id="compose">
-      <input id="text" maxlength="160" autocomplete="off" placeholder="Mensaje para todos (160)">
-      <button type="submit">Enviar</button>
+      <input id="text" maxlength="160" autocomplete="off" placeholder="Escribí un mensaje (160)">
+      <button type="submit" class="btn">Enviar</button>
     </form>
 
     <h2>Mensajes</h2>
-    <ul class="feed" id="feed"><li class="empty">Todavía no llegó nada.</li></ul>
+    <ul class="feed" id="feed"></ul>
+    <div class="pendiente" id="feed-empty"><p><strong>Todavía no llegó nada.</strong></p>
+      <p>Las alertas y voces de la red aparecen acá.</p></div>
   </section>
 
   <section id="tab-map" class="tab" hidden>
+    <h2>Mapa de la red</h2>
+    <p class="nota">Cada cuadrado es un nodo; el color es cuánto ruido escucha. Las líneas son enlaces de radio:
+      más gruesas, mejor señal.</p>
     <svg id="map" viewBox="0 0 360 300" role="img" aria-label="Mapa de la red"></svg>
-    <div class="legend">
-      <span>ruido</span><span class="ramp"></span><span>bajo → alto</span>
-      <span class="sep">línea = enlace de radio (más gruesa, mejor señal)</span>
-    </div>
-    <table class="nodes">
-      <thead><tr><th>Nodo</th><th>Ruido</th><th>Saltos</th><th>Visto</th></tr></thead>
-      <tbody id="nodes"></tbody>
-    </table>
+    <div class="legend"><span>poco ruido</span><span class="ramp"></span><span>mucho ruido</span></div>
+    <h2>Nodos</h2>
+    <ul class="rows" id="nodes"></ul>
   </section>
 
   <section id="tab-node" class="tab" hidden>
     <h2>Este nodo</h2>
-    <dl class="kv" id="self"></dl>
+    <ul class="datos" id="self"></ul>
     <form class="compose" id="rename">
       <input id="name" maxlength="20" autocomplete="off" placeholder="Nombre (ej. Puesto médico)">
-      <button type="submit">Renombrar</button>
+      <button type="submit" class="btn">Renombrar</button>
     </form>
-    <h2>Tráfico</h2>
-    <dl class="kv" id="stats"></dl>
-    <p class="note">Cada nodo reenvía lo que escucha. Sin router, sin datos, sin cuentas:
-      si un nodo se cae, los mensajes siguen por los demás.</p>
-  </section>
-</main>
 
+    <h2>Tráfico</h2>
+    <ul class="stats small" id="traffic"></ul>
+
+    <h2>Cómo funciona</h2>
+    <ol class="pasos">
+      <li><span><b>Conectate al WiFi de un nodo</b>Cada placa abre una red <code>SIGSEV-…</code>. No hace
+        falta internet, datos ni instalar nada.</span></li>
+      <li><span><b>Mandá una alerta o una voz</b>Desde acá o desde los botones de la placa. En la placa,
+        la tecla apartada graba voz mientras la mantenés.</span></li>
+      <li><span><b>La red la reparte</b>Cada nodo reenvía una vez lo que escucha. Si uno se cae, el
+        mensaje sigue por los demás.</span></li>
+      <li><span><b>Llega a todos</b>Se ve en las pantallas de las placas y en cualquier celular conectado
+        a cualquier nodo.</span></li>
+    </ol>
+  </section>
+
+  <footer class="footer">SIGSEV · Ghost in the HAL · FCEyN-UBA</footer>
+</main>
 <script src="/app.js"></script>
 </body>
 </html>
