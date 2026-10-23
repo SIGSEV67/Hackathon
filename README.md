@@ -6,27 +6,30 @@ placas idénticas y cada una se flashea con uno de dos perfiles.
 
 ## Perfiles
 
-| Perfil    | PSRAM            | Display OLED | Build dir       | sdkconfig         |
-|-----------|------------------|--------------|-----------------|-------------------|
-| `display` | no (~380 KB RAM) | sí           | `build_display` | `sdkconfig`       |
-| `psram`   | octal 8 MB       | **no**       | `build_psram`   | `sdkconfig.psram` |
+| Perfil              | PSRAM            | Display OLED                     | Build dir       | sdkconfig           |
+|---------------------|------------------|----------------------------------|-----------------|---------------------|
+| `psram` (default)   | octal 8 MB       | no (sí si se recablea SCL/SDA)   | `build`         | `sdkconfig`         |
+| `display`           | no (~380 KB RAM) | sí, pines originales             | `build_display` | `sdkconfig.display` |
 
 La PSRAM octal embebida usa internamente los GPIO 33–37, y el display usa 36/37:
-son mutuamente excluyentes. Con PSRAM + display la placa entra en boot loop
-(`TG1WDT_SYS_RST`). En el perfil `psram` los pines del LCD ni siquiera están
-definidos (`main/board.h`) y las funciones `display_*` son no-ops.
+con el cableado original son mutuamente excluyentes. Con PSRAM + display la placa
+entra en boot loop (`TG1WDT_SYS_RST`). Mientras SCL/SDA estén en 33–37 y la PSRAM
+activa, los pines del LCD ni siquiera se definen (`main/board.h`) y las
+funciones `display_*` son no-ops.
 
-`sdkconfig.defaults` es la base (perfil display); `sdkconfig.defaults.psram` se
-aplica encima para el perfil psram.
+`sdkconfig.defaults` es el perfil por defecto (psram), así que `idf.py build`
+pelado también funciona. `sdkconfig.defaults.display` se aplica encima para el
+perfil display.
 
 ## Build y flash
 
 ```sh
-./flash.sh <display|psram> [puerto] [build|flash|monitor]
+./flash.sh [psram|display] [puerto] [build|flash|monitor]
 
-./flash.sh display x build                 # solo compilar (el puerto se ignora)
-./flash.sh display /dev/ttyACM0            # compilar + flashear
-./flash.sh psram   /dev/ttyACM1 monitor    # compilar + flashear + monitor
+./flash.sh                                 # psram, /dev/ttyACM0, compilar + flashear
+./flash.sh x build                         # psram, solo compilar (el puerto se ignora)
+./flash.sh display /dev/ttyACM0            # perfil display
+./flash.sh psram /dev/ttyACM1 monitor      # compilar + flashear + monitor serie
 ```
 
 Si `idf.py` no está en el PATH, el script hace `. ~/Hackathon/esp-idf/export.sh`.
@@ -42,8 +45,8 @@ ls /dev/serial/by-id/
 Si no flashea: mantener RESET+BOOT, soltar RESET, soltar BOOT. Para salir del
 monitor: `Ctrl+T` y después `Ctrl+X`.
 
-Para cambiar opciones de un perfil: `idf.py -B build_display menuconfig` o
-`idf.py -B build_psram -D SDKCONFIG=sdkconfig.psram menuconfig`
+Para cambiar opciones de un perfil: `idf.py menuconfig` (psram) o
+`idf.py -B build_display -D SDKCONFIG=sdkconfig.display menuconfig`
 (menú *Hackathon board demo*).
 
 ## Opciones del proyecto (Kconfig)
@@ -51,13 +54,32 @@ Para cambiar opciones de un perfil: `idf.py -B build_display menuconfig` o
 - `HACK_SPEAKER_ENABLE` (default **off**): inicializa el parlante I2S1. Apagado,
   `audio_play_tone()` devuelve `ESP_ERR_NOT_SUPPORTED`. El micrófono anda igual.
 - `HACK_SPEAKER_VOLUME`: volumen del parlante (solo si está habilitado).
+- `HACK_LCD_SCL_IO` / `HACK_LCD_SDA_IO` (default 36 / 37): pines SPI del OLED.
+  Si los dos quedan fuera de 33–37, el display funciona también con PSRAM.
 - `HACK_DISPLAY_ROTATE_180`: rota el OLED.
+
+## PSRAM + display (recablear SCL/SDA)
+
+1. Cortar las pistas de GPIO 36 y 37 hacia el OLED (lo más cerca del conector
+   del OLED), para que el display no quede colgado del bus de la PSRAM.
+2. Soldar dos cables desde SCL y SDA del OLED a dos GPIO libres. Candidatos:
+   - **4 / 5** (pines del parlante, que no usamos; seguramente tienen pad o
+     conector accesible).
+   - 8, 16, 17, 18 (libres, pero hay que encontrar dónde soldar).
+   - Evitar 0, 3, 45, 46 (strapping), 19/20 (USB), 26–37 (flash/PSRAM).
+3. `idf.py menuconfig` → *Hackathon board demo* → cambiar `HACK_LCD_SCL_IO` y
+   `HACK_LCD_SDA_IO`. Si se usan 4/5, dejar `HACK_SPEAKER_ENABLE` apagado.
+4. `./flash.sh`. El log tiene que mostrar `SSD1306 128x64 ready` y
+   `Found 8MB PSRAM device`.
+
+Una vez cortadas las pistas, el perfil `display` también necesita los pines
+nuevos (cambiarlos en su menuconfig).
 
 ## Pines
 
 | Periférico             | Señal                                   | GPIO                 |
 |------------------------|-----------------------------------------|----------------------|
-| Display SSD1306 (SPI)  | SCL / SDA / CS / DC / RST               | 36 / 37 / 38 / 39 / 40 (solo perfil display) |
+| Display SSD1306 (SPI)  | SCL / SDA / CS / DC / RST               | 36 / 37 / 38 / 39 / 40 (SCL/SDA configurables) |
 | Micrófono PDM (I2S0)   | CLK / DOUT                              | 7 / 15               |
 | Parlante (I2S1)        | DIN / BCLK / LRCLK                      | 4 / 5 / 6 (no usado) |
 | Joystick               | UP / DOWN / LEFT / RIGHT / CENTER       | 9 / 11 / 12 / 10 / 13 (CENTER no conectado) |

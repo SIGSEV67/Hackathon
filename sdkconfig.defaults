@@ -1,3 +1,9 @@
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# Perfil por defecto: PSRAM octal de 8 MB. Usa internamente los GPIO 33-37, asi
+# que el display queda deshabilitado mientras SCL/SDA esten en 36/37
+# (ver HACK_LCD_SCL_IO / HACK_LCD_SDA_IO).
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y

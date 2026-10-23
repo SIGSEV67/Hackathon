@@ -1,32 +1,35 @@
 #!/usr/bin/env bash
-# Uso: ./flash.sh <display|psram> [puerto] [build|flash|monitor]
-#   display  sin PSRAM, con OLED (build_display, sdkconfig)
-#   psram    PSRAM octal 8 MB, sin display (build_psram, sdkconfig.psram)
+# Uso: ./flash.sh [psram|display] [puerto] [build|flash|monitor]
+#   psram    (default) PSRAM octal 8 MB, display apagado salvo que SCL/SDA esten
+#            recableados fuera de 33-37 (build, sdkconfig)
+#   display  sin PSRAM, OLED en pines originales (build_display, sdkconfig.display)
 #   puerto   default /dev/ttyACM0. Con dos placas conectadas conviene usar
 #            /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_<MAC>-if00
-#   accion   default flash. "monitor" flashea y abre el monitor.
+#   accion   default flash. "monitor" flashea y abre el monitor serie.
 set -euo pipefail
 
 usage() {
-    sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
     echo
     echo "Placas detectadas:"
     ls -1 /dev/serial/by-id/ 2>/dev/null | sed 's|^|  /dev/serial/by-id/|' || echo "  (ninguna)"
     exit 1
 }
 
-[[ $# -ge 1 ]] || usage
-profile=$1
-port=${2:-/dev/ttyACM0}
-action=${3:-flash}
+profile=psram
+case ${1:-} in
+    psram|display) profile=$1; shift ;;
+    -h|--help)     usage ;;
+esac
+port=${1:-/dev/ttyACM0}
+action=${2:-flash}
 
 cd "$(dirname "$0")"
 
 case $profile in
-    display) args=(-B build_display) ;;
-    psram)   args=(-B build_psram -D SDKCONFIG=sdkconfig.psram
-                   -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.psram") ;;
-    *)       usage ;;
+    psram)   args=(-B build) ;;
+    display) args=(-B build_display -D SDKCONFIG=sdkconfig.display
+                   -D "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.display") ;;
 esac
 
 case $action in

@@ -1,0 +1,3 @@
+# Perfil "display": se aplica encima de sdkconfig.defaults.
+# Sin PSRAM, con el OLED en sus pines originales.
+# CONFIG_SPIRAM is not set

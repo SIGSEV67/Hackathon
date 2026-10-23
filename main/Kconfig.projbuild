@@ -17,6 +17,22 @@ menu "Hackathon board demo"
             Peak amplitude of generated tones. The MAX98357A is loud even at
             low values, keep it low when testing at a desk.
 
+    config HACK_LCD_SCL_IO
+        int "Display SPI SCL GPIO"
+        range 0 48
+        default 36
+        help
+            Original wiring is GPIO 36. The octal PSRAM uses GPIO 33-37, so the
+            display only works together with PSRAM if SCL and SDA are rewired
+            to another pin (e.g. 17).
+
+    config HACK_LCD_SDA_IO
+        int "Display SPI SDA (MOSI) GPIO"
+        range 0 48
+        default 37
+        help
+            Original wiring is GPIO 37. See HACK_LCD_SCL_IO.
+
     config HACK_DISPLAY_ROTATE_180
         bool "Rotate display by 180 degrees"
         default n
