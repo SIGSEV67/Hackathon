@@ -6,6 +6,7 @@
 #include "esp_check.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
@@ -57,7 +58,22 @@ static struct {
     int pcm_len;
 } s_rec;
 
-static TaskHandle_t s_task;
+// Trabajos del task de voz: REC_DONE cierra la grabacion de la placa; otro
+// valor es el id de una voz importada que hay que mandar.
+#define REC_DONE 0
+static QueueHandle_t s_jobs;
+
+// Voz que se esta importando (subida desde el celular). Solo una a la vez.
+static struct {
+    uint32_t msg_id;
+    uint16_t blocks;
+    adpcm_state_t enc;
+} s_import;
+
+static void post_job(uint32_t job)
+{
+    xQueueSend(s_jobs, &job, portMAX_DELAY);
+}
 
 // --- grabacion (task del mic) -------------------------------------------------
 
@@ -67,14 +83,14 @@ static void flush_block(void)
     adpcm_encode(&s_rec.enc, s_rec.pcm, MESSAGES_VOICE_BLOCK_SAMPLES, block.data);
     if (store_voice_put(s_rec.msg_id, s_rec.blocks, &block, NULL) != ESP_OK) {
         s_rec.active = false;  // el store desalojo el mensaje: no hay donde seguir
-        xTaskNotifyGive(s_task);
+        post_job(REC_DONE);
         return;
     }
     s_rec.blocks++;
     s_rec.pcm_len = 0;
     if (s_rec.blocks >= MAX_BLOCKS) {
         s_rec.active = false;
-        xTaskNotifyGive(s_task);
+        post_job(REC_DONE);
     }
 }
 
@@ -167,8 +183,16 @@ static void finish_recording(void)
 static void voice_task(void *arg)
 {
     while (1) {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        finish_recording();
+        uint32_t job;
+        xQueueReceive(s_jobs, &job, portMAX_DELAY);
+        if (job == REC_DONE) {
+            finish_recording();
+            continue;
+        }
+        message_t msg;
+        if (store_get(job, &msg) && send_voice(&msg) == ESP_OK) {
+            courier_sent(job);
+        }
     }
 }
 
@@ -240,7 +264,9 @@ static void on_voice(const mesh_rx_meta_t *meta, const void *payload, size_t len
 
 esp_err_t voice_init(void)
 {
-    ESP_RETURN_ON_FALSE(xTaskCreate(voice_task, "voice", 4096, NULL, 5, &s_task) == pdPASS, ESP_ERR_NO_MEM, TAG,
+    s_jobs = xQueueCreate(4, sizeof(uint32_t));
+    ESP_RETURN_ON_FALSE(s_jobs, ESP_ERR_NO_MEM, TAG, "no mem");
+    ESP_RETURN_ON_FALSE(xTaskCreate(voice_task, "voice", 4096, NULL, 5, NULL) == pdPASS, ESP_ERR_NO_MEM, TAG,
                         "task create failed");
     ESP_RETURN_ON_ERROR(audio_mic_add_sink(on_mic, NULL), TAG, "mic sink failed");
     ESP_RETURN_ON_ERROR(mesh_register_handler(MESH_TYPE_VOICE, on_voice, NULL), TAG, "register failed");
@@ -292,7 +318,7 @@ esp_err_t messages_voice_stop(void)
     }
     s_rec.active = false;
     ESP_LOGI(TAG, "recording stopped after %" PRIu32 " ms", mesh_now_ms() - s_rec.start_ms);
-    xTaskNotifyGive(s_task);
+    post_job(REC_DONE);
     return ESP_OK;
 }
 
@@ -302,6 +328,56 @@ bool messages_voice_recording(uint32_t *elapsed_ms)
         *elapsed_ms = s_rec.active ? mesh_now_ms() - s_rec.start_ms : 0;
     }
     return s_rec.active;
+}
+
+// --- importar (voz subida desde el celular) ------------------------------------------
+
+esp_err_t messages_voice_import_begin(mesh_node_id_t dest, uint32_t samples, uint32_t *out_id)
+{
+    ESP_RETURN_ON_FALSE(dest != mesh_self_id(), ESP_ERR_INVALID_ARG, TAG, "can't send to self");
+    ESP_RETURN_ON_FALSE(samples > 0, ESP_ERR_INVALID_SIZE, TAG, "empty voice");
+    uint32_t blocks = (samples + MESSAGES_VOICE_BLOCK_SAMPLES - 1) / MESSAGES_VOICE_BLOCK_SAMPLES;
+    blocks = blocks > MAX_BLOCKS ? MAX_BLOCKS : blocks;  // lo que sobre se corta
+
+    const message_t msg = {
+        .kind = MESSAGE_VOICE,
+        .origin = mesh_self_id(),
+        .ref = messages_next_ref(),
+        .dest = dest,
+        .hops = MESSAGE_HOPS_SELF,
+        .received_ms = mesh_now_ms(),
+        .voice_blocks = blocks,
+    };
+    ESP_RETURN_ON_ERROR(store_add_voice(&msg, &s_import.msg_id), TAG, "no room for voice");
+    s_import.blocks = 0;
+    s_import.enc = (adpcm_state_t){0};
+    *out_id = s_import.msg_id;
+    return ESP_OK;
+}
+
+esp_err_t messages_voice_import_block(uint32_t id, const int16_t *pcm)
+{
+    ESP_RETURN_ON_FALSE(id == s_import.msg_id, ESP_ERR_INVALID_STATE, TAG, "not importing %" PRIu32, id);
+    voice_block_t block = {.predictor = s_import.enc.predictor, .index = s_import.enc.index};
+    adpcm_encode(&s_import.enc, pcm, MESSAGES_VOICE_BLOCK_SAMPLES, block.data);
+    ESP_RETURN_ON_ERROR(store_voice_put(id, s_import.blocks, &block, NULL), TAG, "voice evicted");
+    s_import.blocks++;
+    return ESP_OK;
+}
+
+esp_err_t messages_voice_import_end(uint32_t id, bool ok)
+{
+    ESP_RETURN_ON_FALSE(id == s_import.msg_id, ESP_ERR_INVALID_STATE, TAG, "not importing %" PRIu32, id);
+    s_import.msg_id = 0;
+    if (!ok || s_import.blocks < MIN_BLOCKS) {
+        store_remove(id);
+        return ok ? ESP_ERR_INVALID_SIZE : ESP_OK;
+    }
+    store_voice_truncate(id, s_import.blocks);
+    ESP_LOGI(TAG, "imported voice %" PRIu32 " (%u ms)", id, s_import.blocks * BLOCK_MS);
+    messages_notify(MESSAGES_EVENT_NEW, id);
+    post_job(id);
+    return ESP_OK;
 }
 
 // --- reproduccion ----------------------------------------------------------------

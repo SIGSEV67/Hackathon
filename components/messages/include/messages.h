@@ -89,6 +89,13 @@ bool messages_get(uint32_t id, message_t *out);
 // Cuantos privados ajenos tenemos en custodia.
 size_t messages_transit_count(void);
 
+// Voz que llega ya grabada (ej. subida desde el celular): PCM a
+// MESSAGES_VOICE_SAMPLE_RATE, de a MESSAGES_VOICE_BLOCK_SAMPLES muestras. Al
+// terminar se manda por la mesh en segundo plano, como una grabacion. Una a la vez.
+esp_err_t messages_voice_import_begin(mesh_node_id_t dest, uint32_t samples, uint32_t *out_id);
+esp_err_t messages_voice_import_block(uint32_t id, const int16_t *pcm);
+esp_err_t messages_voice_import_end(uint32_t id, bool ok);  // ok = false descarta
+
 // Reproduccion en el parlante de la placa (ESP_ERR_NOT_SUPPORTED sin parlante).
 // Pedir otra voz corta la que suena. Grabar tambien la corta.
 esp_err_t messages_voice_play(uint32_t id);
