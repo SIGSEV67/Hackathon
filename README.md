@@ -20,6 +20,10 @@ celular colapsa, un corte de luz o un lugar sin señal.
 Cada placa reenvía lo que escucha, así que si un nodo se cae los mensajes siguen
 por los demás.
 
+> **Documentación detallada** (conceptos, decisiones de diseño, recorridos de
+> punta a punta, protocolo, limitaciones y guía para la presentación) en
+> [`docs/`](docs/README.md).
+
 **Placas y clientes.** Las placas son la red; los celulares se conectan a una
 placa (su *padre*) y la usan de bastión. Cada celu es un usuario con su propio
 ID y nombre: puede escribirle, mandarle voz o archivos en privado a otro celu
