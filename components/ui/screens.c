@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "board.h"
+#include "buttons.h"
 #include "display.h"
 #include "presence.h"
 #include "sdkconfig.h"
@@ -120,6 +121,32 @@ static void header(const ui_view_t *view)
 
 // --- pantallas ------------------------------------------------------------------
 
+// Dibujo de las teclas como estan en la placa: KEY1-3 en fila abajo y KEY4
+// apartada arriba a la derecha. Se rellenan mientras estan apretadas.
+#define KEY_W   26
+#define KEY_H   11
+#define KEY_GAP 3
+#define KEY4_W  36
+
+static void draw_key(int x, int y, int w, const char *label, bool pressed)
+{
+    display_fill_rect(x, y, w, KEY_H, pressed);
+    display_draw_rect(x, y, w, KEY_H);
+    const int tx = x + (w - (int)strlen(label) * DISPLAY_FONT_W) / 2 + 1;
+    display_text(tx, y + 2, label, pressed);
+}
+
+static void draw_keys(void)
+{
+    const uint32_t pressed = buttons_read();
+    const int row_y = H - KEY_H;
+    for (int i = 0; i < 3; i++) {
+        draw_key(i * (KEY_W + KEY_GAP), row_y, KEY_W, g_key_labels[i], pressed & (1u << (BTN_KEY1 + i)));
+    }
+    draw_key(W - KEY4_W, row_y - KEY_H - 2, KEY4_W, g_key_labels[3], pressed & (1u << BTN_KEY4));
+    text(0, row_y - KEY_H, "mantener:", false);
+}
+
 static void draw_home(void)
 {
     presence_node_t self;
@@ -128,27 +155,27 @@ static void draw_home(void)
 
     char line[COLS * 2 + 1];  // text() recorta al ancho de la pantalla
     snprintf(line, sizeof(line), "Vecinos %u  Red %u", self.n_links, (unsigned)n + 1);
-    text(0, 12, line, false);
+    text(0, 11, line, false);
 
-    text(0, 23, "Ruido", false);
-    display_draw_rect(34, 22, W - 34, 9);
-    display_fill_rect(36, 24, self.noise * (W - 38) / 100, 5, true);
+    text(0, 21, "Ruido", false);
+    display_draw_rect(34, 20, W - 34, 9);
+    display_fill_rect(36, 22, self.noise * (W - 38) / 100, 5, true);
 
+    // Ultimo mensaje en una linea: "SOS 12s Puesto med"
     message_t last;
     if (messages_list(&last, 1, 0) == 1) {
         char what[COLS + 1], from[PRESENCE_NAME_MAX + 1], when[8];
         describe(&last, what, sizeof(what));
         presence_name_of(last.origin, from, sizeof(from));
         ago(mesh_now_ms() - last.received_ms, when, sizeof(when));
-        text(0, 35, what, last.kind == MESSAGE_ALERT && last.alert != ALERT_SAFE);
-        snprintf(line, sizeof(line), "%s %s", when, last.hops == MESSAGE_HOPS_SELF ? "(vos)" : from);
-        text(0, 45, line, false);
+        char summary[COLS + PRESENCE_NAME_MAX + 16];
+        snprintf(summary, sizeof(summary), "%s %s %s", what, when, last.hops == MESSAGE_HOPS_SELF ? "(vos)" : from);
+        text(0, 31, summary, last.kind == MESSAGE_ALERT && last.alert != ALERT_SAFE);
     } else {
-        text(0, 35, "Sin mensajes", false);
+        text(0, 31, "Sin mensajes", false);
     }
 
-    display_fill_rect(0, H - 8, W, 8, false);
-    text(0, H - 8, "1VOZ 2SOS 3MED 4PELIG", false);
+    draw_keys();
 }
 
 static void draw_messages(int scroll)

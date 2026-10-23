@@ -33,14 +33,17 @@ Nuestra apuesta está en lo que permite una radio con ~500× más ancho de banda
 
 | Control | Acción |
 |---|---|
-| **KEY1** mantener | Grabar voz (hasta 20 s). Al soltar se manda a toda la red |
-| **KEY2** mantener 1 s | Alerta **SOS** |
-| **KEY3** mantener 1 s | Alerta **MÉDICO** |
-| **KEY4** mantener 1 s | Alerta **PELIGRO** |
+| **KEY1** mantener 1 s | Alerta **SOS** |
+| **KEY2** mantener 1 s | Alerta **MÉDICO** |
+| **KEY3** mantener 1 s | Alerta **PELIGRO** |
+| **KEY4** (la apartada) mantener | Grabar voz (hasta 20 s). Al soltar se manda a toda la red |
 | Joystick ← → | Cambiar pantalla: Inicio / Mensajes / Red |
 | Joystick ↑ ↓ | Scroll; cierra el aviso de alerta recibida |
 
-Las alertas piden mantener apretado para que un toque sin querer no dispare nada.
+KEY1–3 son los tres botones en fila de abajo; KEY4 es el que está apartado arriba
+a la derecha. La pantalla de inicio los dibuja en esa misma posición y los
+rellena mientras están apretados. Las alertas piden mantener apretado para que
+un toque sin querer no dispare nada.
 
 ### En el celular
 

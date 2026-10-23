@@ -29,6 +29,9 @@ typedef struct {
     message_t toast_msg;
 } ui_view_t;
 
+// Etiquetas de KEY1..KEY4 que paso la aplicacion (fijas despues de ui_init).
+extern const char *g_key_labels[4];
+
 // Solo desde el task de la UI (usan buffers estaticos compartidos).
 
 // Dibuja un frame completo de la vista (sin flush). view->scroll ya viene acotado.

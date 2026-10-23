@@ -9,15 +9,17 @@
 static const char *TAG = "controls";
 
 #define ALERT_HOLD_US (1000 * 1000)
+#define PTT_KEY       BTN_KEY4
 
 // Tecla -> alerta que dispara si se la mantiene ALERT_HOLD_US.
 static const struct {
     button_id_t key;
     alert_kind_t alert;
+    const char *label;
 } s_alert_keys[] = {
-    {BTN_KEY2, ALERT_SOS},
-    {BTN_KEY3, ALERT_MEDIC},
-    {BTN_KEY4, ALERT_DANGER},
+    {BTN_KEY1, ALERT_SOS, "SOS"},
+    {BTN_KEY2, ALERT_MEDIC, "MED"},
+    {BTN_KEY3, ALERT_DANGER, "PEL"},
 };
 
 #define ALERT_KEYS (sizeof(s_alert_keys) / sizeof(s_alert_keys[0]))
@@ -38,7 +40,7 @@ static void on_button(void *arg, esp_event_base_t base, int32_t event, void *dat
     const button_id_t btn = *(const button_id_t *)data;
     const bool pressed = event == BUTTONS_EVENT_PRESSED;
 
-    if (btn == BTN_KEY1) {
+    if (btn == PTT_KEY) {
         if (pressed) {
             messages_voice_start();
         } else {
@@ -68,4 +70,17 @@ esp_err_t controls_init(void)
         ESP_RETURN_ON_ERROR(esp_timer_create(&args, &s_hold_timers[i]), TAG, "timer create failed");
     }
     return esp_event_handler_register(BUTTONS_EVENT, ESP_EVENT_ANY_ID, on_button, NULL);
+}
+
+const char *controls_key_label(button_id_t key)
+{
+    if (key == PTT_KEY) {
+        return "VOZ";
+    }
+    for (size_t i = 0; i < ALERT_KEYS; i++) {
+        if (s_alert_keys[i].key == key) {
+            return s_alert_keys[i].label;
+        }
+    }
+    return "";
 }

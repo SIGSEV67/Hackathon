@@ -23,6 +23,8 @@ static const char *TAG = "ui";
 static ui_view_t s_view;
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 
+const char *g_key_labels[4];
+
 static void show_toast(toast_kind_t kind, const message_t *msg, uint32_t duration_ms)
 {
     taskENTER_CRITICAL(&s_lock);
@@ -122,8 +124,11 @@ static void status_log_task(void *arg)
     }
 }
 
-esp_err_t ui_init(void)
+esp_err_t ui_init(const ui_config_t *cfg)
 {
+    for (int i = 0; i < 4; i++) {
+        g_key_labels[i] = cfg->key_labels[i] ? cfg->key_labels[i] : "";
+    }
     if (!BOARD_HAS_DISPLAY) {
         ESP_RETURN_ON_FALSE(xTaskCreate(status_log_task, "ui_log", 3072, NULL, 2, NULL) == pdPASS, ESP_ERR_NO_MEM,
                             TAG, "task create failed");

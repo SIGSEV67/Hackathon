@@ -67,7 +67,11 @@ void app_main(void)
 
     // Interfaces
     ESP_ERROR_CHECK(web_init());
-    if (ui_init() != ESP_OK) {
+    const ui_config_t ui_cfg = {
+        .key_labels = {controls_key_label(BTN_KEY1), controls_key_label(BTN_KEY2), controls_key_label(BTN_KEY3),
+                       controls_key_label(BTN_KEY4)},
+    };
+    if (ui_init(&ui_cfg) != ESP_OK) {
         ESP_LOGE(TAG, "ui init failed, continuing without screen");
     }
     ESP_ERROR_CHECK(controls_init());
