@@ -1,0 +1,5 @@
+# Perfil "psram": se aplica encima de sdkconfig.defaults.
+# PSRAM octal de 8 MB embebida en el ESP32-S3. Usa internamente los GPIO 33-37,
+# asi que el display (SCL=36, SDA=37) queda deshabilitado en este perfil.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
