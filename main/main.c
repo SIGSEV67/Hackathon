@@ -11,6 +11,7 @@
 #include "display.h"
 #include "link.h"
 #include "mesh.h"
+#include "messages.h"
 #include "noise.h"
 #include "presence.h"
 #include "radio.h"
@@ -47,6 +48,7 @@ void app_main(void)
         .noise_take_peak = noise_take_peak,
     };
     ESP_ERROR_CHECK(presence_init(&presence_cfg));
+    ESP_ERROR_CHECK(messages_init());
 
     char name[PRESENCE_NAME_MAX + 1];
     presence_self_name(name, sizeof(name));

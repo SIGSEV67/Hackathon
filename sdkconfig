@@ -982,6 +982,17 @@ CONFIG_SIGSEV_MESH_NEIGHBOR_TIMEOUT_S=15
 # end of SIGSEV: mesh
 
 #
+# SIGSEV: messages
+#
+# default:
+CONFIG_SIGSEV_VOICE_MAX_S=20
+# default:
+CONFIG_SIGSEV_VOICE_STORE_KB=4096
+# default:
+CONFIG_SIGSEV_VOICE_GAIN_MAX=8
+# end of SIGSEV: messages
+
+#
 # SIGSEV: hardware (periph)
 #
 # default:
