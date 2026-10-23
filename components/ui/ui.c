@@ -106,9 +106,10 @@ static void draw_task(void *arg)
             taskEXIT_CRITICAL(&s_lock);
         }
 
-        const mesh_node_id_t selected = screens_draw(&view);
+        const ui_pick_t pick = screens_draw(&view);
         taskENTER_CRITICAL(&s_lock);
-        s_view.selected = selected;
+        s_view.selected = pick.node;
+        s_view.selected_msg = pick.message;
         taskEXIT_CRITICAL(&s_lock);
         display_flush();
         vTaskDelay(pdMS_TO_TICKS(FRAME_MS));
@@ -133,6 +134,14 @@ mesh_node_id_t ui_selected_node(void)
 {
     taskENTER_CRITICAL(&s_lock);
     const mesh_node_id_t id = s_view.screen == SCREEN_NETWORK ? s_view.selected : MESSAGES_TO_ALL;
+    taskEXIT_CRITICAL(&s_lock);
+    return id;
+}
+
+uint32_t ui_selected_message(void)
+{
+    taskENTER_CRITICAL(&s_lock);
+    const uint32_t id = s_view.screen == SCREEN_MESSAGES ? s_view.selected_msg : 0;
     taskEXIT_CRITICAL(&s_lock);
     return id;
 }

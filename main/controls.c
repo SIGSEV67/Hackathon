@@ -1,3 +1,4 @@
+#include "audio.h"
 #include "buttons.h"
 #include "esp_check.h"
 #include "esp_log.h"
@@ -36,17 +37,39 @@ static void on_hold(void *arg)
     }
 }
 
+// KEY4: sobre una voz en Mensajes la reproduce (o la corta); si no, graba
+// mientras se mantiene (en Red, privada al nodo marcado).
+static void on_voice_key(bool pressed)
+{
+    static bool recording;
+    if (!pressed) {
+        if (recording) {
+            messages_voice_stop();
+            recording = false;
+        }
+        return;
+    }
+    message_t msg;
+    const uint32_t picked = ui_selected_message();
+    if (picked && audio_has_speaker() && messages_get(picked, &msg) && msg.kind == MESSAGE_VOICE) {
+        uint32_t playing;
+        if (messages_voice_playing(&playing, NULL) && playing == picked) {
+            messages_voice_play_stop();
+        } else {
+            messages_voice_play(picked);
+        }
+        return;
+    }
+    recording = messages_voice_start(ui_selected_node()) == ESP_OK;
+}
+
 static void on_button(void *arg, esp_event_base_t base, int32_t event, void *data)
 {
     const button_id_t btn = *(const button_id_t *)data;
     const bool pressed = event == BUTTONS_EVENT_PRESSED;
 
     if (btn == PTT_KEY) {
-        if (pressed) {
-            messages_voice_start(ui_selected_node());  // en la pantalla Red: privada al nodo marcado
-        } else {
-            messages_voice_stop();
-        }
+        on_voice_key(pressed);
         return;
     }
     for (size_t i = 0; i < ALERT_KEYS; i++) {

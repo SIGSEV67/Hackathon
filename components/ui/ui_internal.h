@@ -24,8 +24,9 @@ typedef enum {
 
 typedef struct {
     screen_t screen;
-    int scroll;              // en Red es el cursor: 0 = Todos, 1.. = nodos
+    int scroll;              // cursor: en Mensajes, la fila; en Red, 0 = Todos y 1.. = nodos
     mesh_node_id_t selected; // nodo bajo el cursor en Red (lo escribe el task de dibujo)
+    uint32_t selected_msg;   // mensaje bajo el cursor en Mensajes (idem)
     toast_kind_t toast;
     uint32_t toast_until_ms;
     message_t toast_msg;
@@ -36,9 +37,14 @@ extern const char *g_key_labels[4];
 
 // Solo desde el task de la UI (usan buffers estaticos compartidos).
 
+typedef struct {
+    mesh_node_id_t node;  // Red: nodo bajo el cursor (MESSAGES_TO_ALL si no hay)
+    uint32_t message;     // Mensajes: mensaje bajo el cursor (0 si no hay)
+} ui_pick_t;
+
 // Dibuja un frame completo de la vista (sin flush). view->scroll ya viene acotado.
-// Devuelve el nodo bajo el cursor en la pantalla Red (MESSAGES_TO_ALL si no hay).
-mesh_node_id_t screens_draw(const ui_view_t *view);
+// Devuelve lo que quedo bajo el cursor.
+ui_pick_t screens_draw(const ui_view_t *view);
 
 // Cantidad de filas que tiene la pantalla, para acotar el scroll.
 int screens_rows(screen_t screen);

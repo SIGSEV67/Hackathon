@@ -6,11 +6,13 @@
 //   alerts.c   alertas y texto (envio, recepcion, reenvio de texto)
 //   voice.c    grabacion, envio, recepcion y reproduccion de voz
 //   courier.c  custodia de privados: reenvio al destino y ACKs
+//   player.c   reproduccion en el parlante
 //   store.c    donde queda todo
 
 esp_err_t alerts_init(void);
 esp_err_t voice_init(void);
 esp_err_t courier_init(void);
+esp_err_t player_init(void);
 
 // Publica un evento de MESSAGES_EVENT con el id del mensaje.
 void messages_notify(messages_event_id_t event, uint32_t id);

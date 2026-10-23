@@ -256,6 +256,7 @@ esp_err_t messages_voice_start(mesh_node_id_t dest)
 {
     ESP_RETURN_ON_FALSE(!s_rec.busy, ESP_ERR_INVALID_STATE, TAG, "already recording");
     ESP_RETURN_ON_FALSE(dest != mesh_self_id(), ESP_ERR_INVALID_ARG, TAG, "can't send to self");
+    messages_voice_play_stop();  // el mic grabaria el parlante
 
     const message_t msg = {
         .kind = MESSAGE_VOICE,

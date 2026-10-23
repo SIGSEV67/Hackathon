@@ -22,6 +22,7 @@ esp_err_t messages_init(void)
     ESP_RETURN_ON_ERROR(alerts_init(), TAG, "alerts init failed");
     ESP_RETURN_ON_ERROR(voice_init(), TAG, "voice init failed");
     ESP_RETURN_ON_ERROR(courier_init(), TAG, "courier init failed");
+    ESP_RETURN_ON_ERROR(player_init(), TAG, "player init failed");
     return ESP_OK;
 }
 

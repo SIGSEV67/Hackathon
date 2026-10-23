@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "audio.h"
 #include "board.h"
 #include "buttons.h"
 #include "display.h"
@@ -113,6 +114,18 @@ static void describe(const message_t *m, char *out, size_t len)
     }
 }
 
+// "MSJ 4:oir" si el cursor esta sobre una voz completa y hay parlante.
+static const char *messages_title(const ui_view_t *view)
+{
+    message_t m;
+    if (!audio_has_speaker() || !view->selected_msg || !messages_get(view->selected_msg, &m) ||
+        m.kind != MESSAGE_VOICE || m.voice_received < m.voice_blocks) {
+        return s_titles[SCREEN_MESSAGES];
+    }
+    uint32_t playing;
+    return messages_voice_playing(&playing, NULL) && playing == m.id ? "MSJ 4:parar" : "MSJ 4:oir";
+}
+
 static void header(const ui_view_t *view)
 {
     char name[PRESENCE_NAME_MAX + 1];
@@ -127,6 +140,7 @@ static void header(const ui_view_t *view)
     snprintf(net_title, sizeof(net_title), "RED %08" PRIX32, mesh_self_id());  // el id, para dictarlo
     const char *title = view->screen == SCREEN_HOME      ? name
                         : view->screen == SCREEN_NETWORK ? net_title
+                        : view->screen == SCREEN_MESSAGES ? messages_title(view)
                                                          : s_titles[view->screen];
     char buf[COLS + 1];
     to_ascii(title, buf, sizeof(buf));
@@ -194,26 +208,35 @@ static void draw_home(void)
     draw_keys();
 }
 
-static void draw_messages(int scroll)
+// El cursor es un recuadro (la inversion ya marca las alertas). Devuelve el id
+// del mensaje bajo el cursor.
+static uint32_t draw_messages(int cursor)
 {
     const size_t total = messages_list(s_msgs, MAX_ROWS, 0);
     if (!total) {
         text(0, LIST_Y + 10, "Sin mensajes todavia", false);
-        return;
+        return 0;
     }
+    uint32_t playing;
+    messages_voice_playing(&playing, NULL);
     const uint32_t now = mesh_now_ms();
-    for (size_t i = scroll, row = 0; i < total && row < LIST_ROWS; i++, row++) {
+    const int first = cursor >= LIST_ROWS ? cursor - LIST_ROWS + 1 : 0;
+    for (size_t i = first, row = 0; i < total && row < LIST_ROWS; i++, row++) {
         const message_t *m = &s_msgs[i];
         char what[COLS + 1], when[8], line[COLS * 2 + 1];
         describe(m, what, sizeof(what));
         ago(now - m->received_ms, when, sizeof(when));
         const char mark = m->kind == MESSAGE_ALERT          ? '!'
                           : m->dest != MESSAGES_TO_ALL       ? '@'  // privado
-                          : m->kind == MESSAGE_VOICE         ? '>'
+                          : m->kind == MESSAGE_VOICE         ? (m->id == playing ? '*' : '>')
                                                              : '"';
         snprintf(line, sizeof(line), "%c%-3s %s", mark, when, what);
-        text(0, LIST_Y + row * ROW_H, line, m->kind == MESSAGE_ALERT && m->alert != ALERT_SAFE);
+        text(1, LIST_Y + row * ROW_H, line, m->kind == MESSAGE_ALERT && m->alert != ALERT_SAFE);
+        if ((int)i == cursor) {
+            display_draw_rect(0, LIST_Y + row * ROW_H - 1, W, ROW_H + 1);
+        }
     }
+    return (size_t)cursor < total ? s_msgs[cursor].id : 0;
 }
 
 // Historial de nodos con los vivos primero. Devuelve cuantos.
@@ -316,18 +339,19 @@ static void draw_box(const char *title, const char *body)
     text_center(34, body, 1, true);
 }
 
-mesh_node_id_t screens_draw(const ui_view_t *view)
+ui_pick_t screens_draw(const ui_view_t *view)
 {
+    const ui_pick_t keep = {.node = view->selected, .message = view->selected_msg};
     uint32_t rec_ms;
     if (messages_voice_recording(&rec_ms)) {
         draw_recording(rec_ms);
-        return view->selected;
+        return keep;
     }
     if (view->toast == TOAST_ALERT) {
         draw_alert(&view->toast_msg);
-        return view->selected;
+        return keep;
     }
-    mesh_node_id_t selected = MESSAGES_TO_ALL;
+    ui_pick_t pick = {0};
 
     display_clear();
     header(view);
@@ -336,10 +360,10 @@ mesh_node_id_t screens_draw(const ui_view_t *view)
         draw_home();
         break;
     case SCREEN_MESSAGES:
-        draw_messages(view->scroll);
+        pick.message = draw_messages(view->scroll);
         break;
     case SCREEN_NETWORK:
-        selected = draw_network(view->scroll);
+        pick.node = draw_network(view->scroll);
         break;
     case SCREEN_COUNT:
         break;
@@ -366,7 +390,7 @@ mesh_node_id_t screens_draw(const ui_view_t *view)
     default:
         break;
     }
-    return selected;
+    return pick;
 }
 
 int screens_rows(screen_t screen)

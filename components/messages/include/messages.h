@@ -61,6 +61,7 @@ typedef enum {
     MESSAGES_EVENT_DELIVERED,   // data: uint32_t id. El destino de un privado confirmo
     MESSAGES_EVENT_REC_STARTED,
     MESSAGES_EVENT_REC_STOPPED, // data: uint32_t id del mensaje grabado (o 0 si fue muy corto)
+    MESSAGES_EVENT_PLAY_STOPPED,// data: uint32_t id. Termino (o se corto) una reproduccion
 } messages_event_id_t;
 
 // Requiere mesh_init, presence_init y audio_init.
@@ -87,6 +88,12 @@ size_t messages_list(message_t *out, size_t max, uint32_t after_id);
 bool messages_get(uint32_t id, message_t *out);
 // Cuantos privados ajenos tenemos en custodia.
 size_t messages_transit_count(void);
+
+// Reproduccion en el parlante de la placa (ESP_ERR_NOT_SUPPORTED sin parlante).
+// Pedir otra voz corta la que suena. Grabar tambien la corta.
+esp_err_t messages_voice_play(uint32_t id);
+void messages_voice_play_stop(void);
+bool messages_voice_playing(uint32_t *id, uint32_t *pos_ms);
 
 // Decodifica un bloque de voz a PCM (MESSAGES_VOICE_BLOCK_SAMPLES muestras a
 // MESSAGES_VOICE_SAMPLE_RATE), normalizado. Bloques perdidos salen en silencio.
