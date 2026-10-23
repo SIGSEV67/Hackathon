@@ -1,4 +1,4 @@
-menu "Hackathon board demo"
+menu "SIGSEV: hardware (periph)"
 
     config HACK_SPEAKER_ENABLE
         bool "Enable speaker (I2S1)"

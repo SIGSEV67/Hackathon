@@ -977,13 +977,13 @@ CONFIG_PARTITION_TABLE_MD5=y
 # end of Partition Table
 
 #
-# Hackathon board demo
+# SIGSEV: hardware (periph)
 #
 # default:
 # CONFIG_HACK_SPEAKER_ENABLE is not set
 # default:
 # CONFIG_HACK_DISPLAY_ROTATE_180 is not set
-# end of Hackathon board demo
+# end of SIGSEV: hardware (periph)
 
 #
 # Compiler options
