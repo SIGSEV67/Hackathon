@@ -54,8 +54,9 @@ static void on_message(void *arg, esp_event_base_t base, int32_t event, void *da
         } else if (msg.kind == MESSAGE_TEXT) {
             show_toast(TOAST_INCOMING, &msg, INCOMING_TOAST_MS);
         }
-    } else if (event == MESSAGES_EVENT_UPDATED && msg.kind == MESSAGE_VOICE && !own) {
-        show_toast(TOAST_INCOMING, &msg, INCOMING_TOAST_MS);  // la voz se avisa cuando termino de llegar
+    } else if (event == MESSAGES_EVENT_UPDATED && (msg.kind == MESSAGE_VOICE || msg.kind == MESSAGE_FILE) && !own &&
+               msg.blocks_received == msg.blocks) {
+        show_toast(TOAST_INCOMING, &msg, INCOMING_TOAST_MS);  // voz y archivos se avisan cuando terminaron de llegar
     } else if (event == MESSAGES_EVENT_DELIVERED && own) {
         show_toast(TOAST_DELIVERED, &msg, INCOMING_TOAST_MS);
     }

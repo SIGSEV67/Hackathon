@@ -26,6 +26,9 @@ const app = {
   known: [],      // historial de nodos (para elegir el destino de un privado)
   pending: new Set(),  // privados propios todavía sin confirmar
   voiceMaxS: 20,
+  fileMax: 48 * 1024,
+  speaker: false,
+  thumbs: new Map(),  // id -> <img>, para no volver a pedir la imagen en cada refresco
 };
 
 // --- API -----------------------------------------------------------------------
@@ -76,10 +79,46 @@ function banner(text, ok) {
 
 // --- feed --------------------------------------------------------------------------
 
+function kb(bytes) {
+  return bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 1024)} KB`;
+}
+
 function describe(m) {
   if (m.kind === 'alert') return ALERT_LABELS[m.alert] || m.label;
   if (m.kind === 'text') return m.text;
+  if (m.kind === 'file') return m.size ? `${m.name} · ${kb(m.size)}` : 'Archivo';
   return `Mensaje de voz · ${Math.max(1, Math.round(m.ms / 1000))} s`;
+}
+
+async function playOnBoard(m) {
+  try {
+    await post(`/api/play?id=${m.id}`);
+    banner('Sonando en la placa', true);
+  } catch (e) { banner(`No se pudo (${e.message})`); }
+}
+
+function fileBody(m, body) {
+  const complete = m.size > 0 && m.got >= m.blocks;
+  if (!complete) {
+    body.append(el('div', 'meta', `Recibiendo ${Math.floor((100 * m.got) / m.blocks)}%`));
+    return;
+  }
+  const url = `/api/file?id=${m.id}`;
+  if (/^image\/(jpeg|png|webp|gif)$/.test(m.mime)) {
+    let img = app.thumbs.get(m.id);
+    if (!img) {
+      img = el('img', 'thumb');
+      img.src = url;
+      img.alt = m.name;
+      img.onclick = () => window.open(url, '_blank');
+      app.thumbs.set(m.id, img);
+    }
+    body.append(img);
+  }
+  const link = el('a', 'play', `⬇ Descargar`);
+  link.href = url;
+  link.download = m.name;
+  body.append(link);
 }
 
 async function playVoice(m) {
@@ -129,11 +168,19 @@ function feedItem(m) {
     const complete = m.got >= m.blocks;
     let label = complete ? '▸ Escuchar' : `Recibiendo ${Math.floor((100 * m.got) / m.blocks)}%`;
     if (app.playing === m.id) label = '♪ Sonando…';
+    const actions = el('div', 'actions');
     const button = el('button', 'play', label);
     button.disabled = !complete || app.playing !== null;
     button.onclick = () => playVoice(m);
-    body.append(button);
+    actions.append(button);
+    if (app.speaker && complete) {
+      const board = el('button', 'play', '▶ en la placa');
+      board.onclick = () => playOnBoard(m);
+      actions.append(board);
+    }
+    body.append(actions);
   }
+  if (m.kind === 'file') fileBody(m, body);
   li.append(body);
   return li;
 }
@@ -320,8 +367,88 @@ async function sendAudioFile(file) {
   }
 }
 
+// --- archivos ------------------------------------------------------------------------------
+// Entra poco (decenas de KB sin PSRAM), así que las fotos se achican y se
+// recomprimen acá antes de subirlas.
+
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('imagen ilegible')); };
+    img.src = url;
+  });
+}
+
+const toBlob = (canvas, q) => new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', q));
+
+async function shrinkImage(file, limit) {
+  const img = await loadImage(file);
+  for (const side of [1280, 1024, 800, 640, 480, 360, 240]) {
+    const scale = Math.min(1, side / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(img.naturalWidth * scale);
+    canvas.height = Math.round(img.naturalHeight * scale);
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    for (const q of [0.8, 0.65, 0.5, 0.35]) {
+      const blob = await toBlob(canvas, q);
+      if (blob && blob.size <= limit) return blob;
+    }
+  }
+  throw new Error('no se pudo achicar lo suficiente');
+}
+
+// Corta el nombre a 40 bytes de UTF-8 (lo que guarda la placa).
+function shortName(name) {
+  const enc = new TextEncoder();
+  let out = '';
+  for (const ch of name) {
+    if (enc.encode(out + ch).length > 40) break;
+    out += ch;
+  }
+  return out;
+}
+
+async function sendFile(file) {
+  let to;
+  try {
+    to = resolveRecipient();
+  } catch (e) { banner(`Destino inválido: ${e.message}`); return; }
+  const button = $('#file-btn');
+  button.disabled = true;
+  button.textContent = 'Preparando…';
+  try {
+    let body = file, type = file.type || 'application/octet-stream', name = file.name || 'archivo';
+    const photo = /^image\/(jpeg|png|webp|heic|heif)$/.test(file.type);
+    if (photo && file.size > app.fileMax * 0.9) {
+      body = await shrinkImage(file, app.fileMax * 0.9);
+      type = 'image/jpeg';
+      name = name.replace(/\.[^.]*$/, '') + '.jpg';
+    }
+    if (body.size > app.fileMax) throw new Error(`máximo ${kb(app.fileMax)}`);
+    button.textContent = 'Enviando…';
+    await api(to ? `/api/file?to=${to}` : '/api/file', {
+      method: 'POST', body, headers: { 'Content-Type': type, 'X-File-Name': encodeURIComponent(shortName(name)) },
+    });
+    banner(`${to ? `Archivo privado para ${recipientName(to)}` : 'Archivo enviado'} (${kb(body.size)})`, true);
+    pollMessages();
+  } catch (e) {
+    banner(`No se pudo mandar el archivo (${e.message})`);
+  } finally {
+    button.disabled = false;
+    button.textContent = '＋ Foto / archivo';
+  }
+}
+
 function setupForms() {
   $('#to').addEventListener('change', updateComposeMode);
+  $('#file-btn').addEventListener('click', () => $('#file-in').click());
+  $('#file-in').addEventListener('change', (ev) => {
+    const file = ev.target.files[0];
+    ev.target.value = '';
+    if (file) sendFile(file);
+  });
   $('#rec-btn').addEventListener('click', () => $('#rec-file').click());
   $('#rec-file').addEventListener('change', (ev) => {
     const file = ev.target.files[0];
@@ -533,6 +660,9 @@ async function pollState() {
     renderSelf(state);
     renderRecipients(state);
     if (state.voice_max_s) app.voiceMaxS = state.voice_max_s;
+    if (state.file_max) app.fileMax = state.file_max;
+    app.speaker = !!state.speaker;
+    $('#file-note').textContent = `Archivos de hasta ${kb(app.fileMax)}; las fotos se achican solas.`;
     updateMap(state);
   } catch (e) {
     $('#hero-net').textContent = 'sin conexión con el nodo…';
