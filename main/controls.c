@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "messages.h"
+#include "ui.h"
 
 #include "controls.h"
 
@@ -42,7 +43,7 @@ static void on_button(void *arg, esp_event_base_t base, int32_t event, void *dat
 
     if (btn == PTT_KEY) {
         if (pressed) {
-            messages_voice_start(MESSAGES_TO_ALL);
+            messages_voice_start(ui_selected_node());  // en la pantalla Red: privada al nodo marcado
         } else {
             messages_voice_stop();
         }

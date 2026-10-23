@@ -22,6 +22,7 @@ static const char *const s_titles[SCREEN_COUNT] = {"", "MENSAJES", "RED"};
 // Buffers grandes fuera del stack. Todo este archivo corre solo en el task de
 // la UI, asi que no hace falta lock.
 static presence_node_t s_nodes[MAX_ROWS + 1];
+static presence_known_t s_known[PRESENCE_MAX_KNOWN];
 static message_t s_msgs[MAX_ROWS];
 
 // La fuente es ASCII: pasa las letras con tilde y la enie a su version simple
@@ -88,6 +89,17 @@ static void ago(uint32_t ms, char *out, size_t len)
 
 static void describe(const message_t *m, char *out, size_t len)
 {
+    // Privado propio: "a Nombre: ..." para saber a quien fue.
+    if (m->dest != MESSAGES_TO_ALL && m->hops == MESSAGE_HOPS_SELF) {
+        char to[PRESENCE_NAME_MAX + 1];
+        presence_name_of(m->dest, to, sizeof(to));
+        const int n = snprintf(out, len, "a %s%s: ", to, m->delivered ? "(ok)" : "");
+        if (n < 0 || (size_t)n >= len) {
+            return;
+        }
+        out += n;
+        len -= n;
+    }
     switch (m->kind) {
     case MESSAGE_ALERT:
         snprintf(out, len, "%s", messages_alert_label(m->alert));
@@ -111,7 +123,11 @@ static void header(const ui_view_t *view)
 
     display_fill_rect(0, 0, W, 9, true);
     const int right_x = W - (int)strlen(right) * DISPLAY_FONT_W - 1;
-    const char *title = view->screen == SCREEN_HOME ? name : s_titles[view->screen];
+    char net_title[16];
+    snprintf(net_title, sizeof(net_title), "RED %08" PRIX32, mesh_self_id());  // el id, para dictarlo
+    const char *title = view->screen == SCREEN_HOME      ? name
+                        : view->screen == SCREEN_NETWORK ? net_title
+                                                         : s_titles[view->screen];
     char buf[COLS + 1];
     to_ascii(title, buf, sizeof(buf));
     buf[(right_x - 2) / DISPLAY_FONT_W] = '\0';
@@ -191,26 +207,70 @@ static void draw_messages(int scroll)
         char what[COLS + 1], when[8], line[COLS * 2 + 1];
         describe(m, what, sizeof(what));
         ago(now - m->received_ms, when, sizeof(when));
-        const char mark = m->kind == MESSAGE_ALERT ? '!' : (m->kind == MESSAGE_VOICE ? '>' : '"');
+        const char mark = m->kind == MESSAGE_ALERT          ? '!'
+                          : m->dest != MESSAGES_TO_ALL       ? '@'  // privado
+                          : m->kind == MESSAGE_VOICE         ? '>'
+                                                             : '"';
         snprintf(line, sizeof(line), "%c%-3s %s", mark, when, what);
         text(0, LIST_Y + row * ROW_H, line, m->kind == MESSAGE_ALERT && m->alert != ALERT_SAFE);
     }
 }
 
-static void draw_network(int scroll)
+// Historial de nodos con los vivos primero. Devuelve cuantos.
+static size_t known_sorted(void)
 {
-    presence_self(&s_nodes[0]);
-    const size_t total = 1 + presence_nodes(&s_nodes[1], MAX_ROWS);
-    for (size_t i = scroll, row = 0; i < total && row < LIST_ROWS; i++, row++) {
-        char line[COLS * 2 + 1], name[11];
-        to_ascii(s_nodes[i].name, name, sizeof(name));
-        if (i == 0) {
-            snprintf(line, sizeof(line), "%-10s r%-3u *", name, s_nodes[i].noise);
-        } else {
-            snprintf(line, sizeof(line), "%-10s r%-3u %us", name, s_nodes[i].noise, s_nodes[i].hops + 1);
+    const size_t n = presence_known(s_known, PRESENCE_MAX_KNOWN);
+    size_t alive = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (s_known[i].alive) {
+            const presence_known_t k = s_known[i];
+            memmove(&s_known[alive + 1], &s_known[alive], (i - alive) * sizeof(k));
+            s_known[alive++] = k;
         }
-        text(0, LIST_Y + row * ROW_H, line, false);
     }
+    return n;
+}
+
+static const presence_node_t *alive_node(mesh_node_id_t id, size_t n_alive)
+{
+    for (size_t i = 0; i < n_alive; i++) {
+        if (s_nodes[i].id == id) {
+            return &s_nodes[i];
+        }
+    }
+    return NULL;
+}
+
+// Fila 0 = Todos, despues el historial. El cursor (scroll) marca el destino de
+// la voz de KEY4; la ventana se corre para que el cursor siempre se vea.
+static mesh_node_id_t draw_network(int cursor)
+{
+    const size_t n_known = known_sorted();
+    const size_t n_alive = presence_nodes(s_nodes, MAX_ROWS);
+    const size_t total = 1 + n_known;
+    const int first = cursor >= LIST_ROWS ? cursor - LIST_ROWS + 1 : 0;
+
+    for (size_t i = first, row = 0; i < total && row < LIST_ROWS; i++, row++) {
+        char line[COLS * 2 + 1], name[11];
+        if (i == 0) {
+            snprintf(line, sizeof(line), "Todos     (4: voz)");
+        } else {
+            const presence_known_t *k = &s_known[i - 1];
+            to_ascii(k->name, name, sizeof(name));
+            const presence_node_t *node = k->alive ? alive_node(k->id, n_alive) : NULL;
+            if (node) {
+                snprintf(line, sizeof(line), "%-10s r%-3u %us", name, node->noise, node->hops + 1);
+            } else if (k->seen) {
+                char when[8];
+                ago(k->age_ms, when, sizeof(when));
+                snprintf(line, sizeof(line), "%-10s -- %s", name, when);
+            } else {
+                snprintf(line, sizeof(line), "%-10s --", name);
+            }
+        }
+        text(0, LIST_Y + row * ROW_H, line, (int)i == cursor);
+    }
+    return cursor > 0 && (size_t)cursor <= n_known ? s_known[cursor - 1].id : MESSAGES_TO_ALL;
 }
 
 // --- avisos encima de la pantalla ----------------------------------------------------
@@ -256,17 +316,18 @@ static void draw_box(const char *title, const char *body)
     text_center(34, body, 1, true);
 }
 
-void screens_draw(const ui_view_t *view)
+mesh_node_id_t screens_draw(const ui_view_t *view)
 {
     uint32_t rec_ms;
     if (messages_voice_recording(&rec_ms)) {
         draw_recording(rec_ms);
-        return;
+        return view->selected;
     }
     if (view->toast == TOAST_ALERT) {
         draw_alert(&view->toast_msg);
-        return;
+        return view->selected;
     }
+    mesh_node_id_t selected = MESSAGES_TO_ALL;
 
     display_clear();
     header(view);
@@ -278,24 +339,34 @@ void screens_draw(const ui_view_t *view)
         draw_messages(view->scroll);
         break;
     case SCREEN_NETWORK:
-        draw_network(view->scroll);
+        selected = draw_network(view->scroll);
         break;
     case SCREEN_COUNT:
         break;
     }
 
-    if (view->toast == TOAST_SENT || view->toast == TOAST_INCOMING) {
-        char what[COLS + 1], from[PRESENCE_NAME_MAX + 1];
-        describe(&view->toast_msg, what, sizeof(what));
-        if (view->toast == TOAST_SENT) {
-            draw_box("ENVIADO", what);
-        } else {
-            presence_name_of(view->toast_msg.origin, from, sizeof(from));
-            char title[COLS * 2 + 1];
-            snprintf(title, sizeof(title), "de %s", from);
-            draw_box(title, view->toast_msg.kind == MESSAGE_VOICE ? "VOZ: oir en el celu" : what);
-        }
+    const message_t *tm = &view->toast_msg;
+    char what[COLS * 2 + 1], who[PRESENCE_NAME_MAX + 1], title[COLS * 2 + 1];
+    switch (view->toast) {
+    case TOAST_SENT:
+        describe(tm, what, sizeof(what));
+        draw_box(tm->dest ? "ENVIADO (privado)" : "ENVIADO", what);
+        break;
+    case TOAST_INCOMING:
+        describe(tm, what, sizeof(what));
+        presence_name_of(tm->origin, who, sizeof(who));
+        snprintf(title, sizeof(title), "%s %s", tm->dest ? "PRIVADO de" : "de", who);
+        draw_box(title, tm->kind == MESSAGE_VOICE ? "VOZ: oir en el celu" : what);
+        break;
+    case TOAST_DELIVERED:
+        presence_name_of(tm->dest, who, sizeof(who));
+        snprintf(title, sizeof(title), "a %s", who);
+        draw_box("ENTREGADO", title);
+        break;
+    default:
+        break;
     }
+    return selected;
 }
 
 int screens_rows(screen_t screen)
@@ -304,7 +375,7 @@ int screens_rows(screen_t screen)
     case SCREEN_MESSAGES:
         return messages_list(s_msgs, MAX_ROWS, 0);
     case SCREEN_NETWORK:
-        return 1 + presence_nodes(s_nodes, MAX_ROWS);
+        return 1 + presence_known(s_known, PRESENCE_MAX_KNOWN);
     default:
         return 1;
     }

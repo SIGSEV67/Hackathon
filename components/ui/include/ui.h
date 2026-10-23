@@ -1,9 +1,10 @@
 #pragma once
 
 #include "esp_err.h"
+#include "mesh.h"
 
 // Interfaz en la placa. Con display: pantallas en el OLED (Inicio, Mensajes,
-// Red) que se recorren con el joystick, y avisos encima (grabando, alerta
+// Red) que se recorren con el joystick (en Red, arriba/abajo marca un nodo), y avisos encima (grabando, alerta
 // recibida, enviado). Sin display (perfil psram): un resumen periodico por log.
 //
 // La UI solo muestra: que hace cada boton lo decide la aplicacion, que le pasa
@@ -13,3 +14,7 @@ typedef struct {
 } ui_config_t;
 
 esp_err_t ui_init(const ui_config_t *cfg);
+
+// Destino elegido en la pantalla Red (el cursor del joystick), o
+// MESSAGES_TO_ALL si no hay un nodo marcado o la pantalla es otra.
+mesh_node_id_t ui_selected_node(void);

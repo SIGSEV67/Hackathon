@@ -56,6 +56,8 @@ static void on_message(void *arg, esp_event_base_t base, int32_t event, void *da
         }
     } else if (event == MESSAGES_EVENT_UPDATED && msg.kind == MESSAGE_VOICE && !own) {
         show_toast(TOAST_INCOMING, &msg, INCOMING_TOAST_MS);  // la voz se avisa cuando termino de llegar
+    } else if (event == MESSAGES_EVENT_DELIVERED && own) {
+        show_toast(TOAST_DELIVERED, &msg, INCOMING_TOAST_MS);
     }
 }
 
@@ -104,7 +106,10 @@ static void draw_task(void *arg)
             taskEXIT_CRITICAL(&s_lock);
         }
 
-        screens_draw(&view);
+        const mesh_node_id_t selected = screens_draw(&view);
+        taskENTER_CRITICAL(&s_lock);
+        s_view.selected = selected;
+        taskEXIT_CRITICAL(&s_lock);
         display_flush();
         vTaskDelay(pdMS_TO_TICKS(FRAME_MS));
     }
@@ -122,6 +127,14 @@ static void status_log_task(void *arg)
         ESP_LOGI(TAG, "%s: %u nodes in mesh, %u direct neighbors, noise %u", self.name, (unsigned)n + 1,
                  self.n_links, self.noise);
     }
+}
+
+mesh_node_id_t ui_selected_node(void)
+{
+    taskENTER_CRITICAL(&s_lock);
+    const mesh_node_id_t id = s_view.screen == SCREEN_NETWORK ? s_view.selected : MESSAGES_TO_ALL;
+    taskEXIT_CRITICAL(&s_lock);
+    return id;
 }
 
 esp_err_t ui_init(const ui_config_t *cfg)
