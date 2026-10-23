@@ -10,7 +10,11 @@ celular colapsa, un corte de luz o un lugar sin señal.
 - **Texto libre** desde el celular.
 - **Mensajes privados** (texto o voz) a un nodo puntual, aunque no esté en la red:
   los demás nodos lo guardan y se lo pasan cuando aparece (store-and-forward).
-- **Mapa de la red y del ruido**: qué nodos hay, cómo están enlazados y cuánto ruido mide cada uno.
+- **Llamadas** entre placas tipo walkie-talkie: se habla en vivo con la tecla apretada.
+- **Voces desde el celular** y **fotos/archivos** (las fotos se achican solas para que entren).
+- **Parlante en la placa** para escuchar las voces.
+- **Mapa de la red y del ruido**: qué nodos hay, cómo están enlazados, cuánto ruido mide cada uno y a
+  **qué distancia** están (medida por WiFi FTM, o estimada por señal).
 
 Cada placa reenvía lo que escucha, así que si un nodo se cae los mensajes siguen
 por los demás.
@@ -40,7 +44,14 @@ Nuestra apuesta está en lo que permite una radio con ~500× más ancho de banda
 | **KEY3** mantener 1 s | Alerta **PELIGRO** |
 | **KEY4** (la apartada) mantener | Grabar voz (hasta 20 s). Al soltar se manda a toda la red, o en privado al nodo marcado en la pantalla Red |
 | Joystick ← → | Cambiar pantalla: Inicio / Mensajes / Red |
-| Joystick ↑ ↓ | Scroll; en Red mueve el cursor (Todos o un nodo); cierra el aviso de alerta recibida |
+| Joystick ↑ ↓ | Mueve el cursor: en Mensajes, un mensaje; en Red, Todos o un nodo. Cierra el aviso de alerta recibida |
+| **KEY4** en Mensajes, sobre una voz | Escucharla en el parlante (otra vez: cortar) |
+| **KEY1** toque corto en Red, con un nodo marcado | **Llamarlo** |
+| Durante una llamada | **KEY4** mantener: hablar · **KEY1** toque: atender / colgar · **KEY2** toque: rechazar |
+
+Las llamadas son de a un lado por vez (half-duplex): con el mic al lado del
+parlante, hablar los dos a la vez acoplaría. Mientras uno habla, la pantalla
+dice AL AIRE; el otro ve ESCUCHANDO.
 
 La pantalla **Red** muestra el ID propio en el título y lista el historial de
 nodos conocidos (los que no están, con `--` y hace cuánto se los vio). Los
@@ -57,17 +68,26 @@ un toque sin querer no dispare nada.
 1. Conectarse al WiFi abierto `SIGSEV-XXXX` (cada nodo publica el suyo).
 2. El portal se abre solo; si no, entrar a `http://192.168.4.1/`.
 3. Pestañas:
-   - **Alertas**: botones de alerta (mantener apretado), mensajes de texto y feed
-     con reproducción de voz. En **Para** se elige *Todos*, un nodo del historial
-     o *Otro ID…* (las 8 cifras, o las últimas si alcanzan para identificarlo).
-     Los privados propios muestran *en camino…* hasta que vuelve el ✓.
-   - **Red**: mapa de nodos coloreados por ruido, con enlaces más gruesos cuanto mejor es la señal.
+   - **Alertas**: botones de alerta (mantener apretado), texto, **● Grabar audio**,
+     **＋ Foto / archivo** y el feed (voces para escuchar en el celu o *▶ en la
+     placa*, fotos que se ven ahí mismo, archivos para bajar). En **Para** se elige
+     *Todos*, un nodo del historial o *Otro ID…* (las 8 cifras, o las últimas si
+     alcanzan para identificarlo). Los privados propios muestran *en camino…*
+     hasta que vuelve el ✓.
+   - **Red**: mapa de nodos coloreados por ruido, con enlaces más gruesos cuanto mejor es la señal
+     y largos según la distancia medida (continuos: FTM; punteados con `~`: estimados por RSSI).
      La lista incluye los nodos del historial que no están, con ✉ para escribirles.
    - **Nodo**: renombrar el nodo (ej. "Puesto médico") y estadísticas de tráfico.
 
-La placa no tiene parlante: las voces se escuchan en el celular. Las voces
-privadas salen de la placa: el celular no puede grabar porque el navegador solo
-da el micrófono en páginas HTTPS, y el portal es HTTP plano.
+**Audio desde el celular sin HTTPS.** El navegador solo da el micrófono
+(`getUserMedia`) en páginas HTTPS y el portal es HTTP plano. Por eso *Grabar audio*
+abre el grabador del sistema (`<input capture>`), y Web Audio, que sí anda en
+HTTP, decodifica lo que devuelve: lo pasa a mono a 8 kHz y la placa lo codifica
+en ADPCM como si lo hubiera grabado ella. En Android abre la grabadora; en iPhone,
+según la versión, puede ofrecer elegir un archivo de audio.
+
+**Archivos.** Hasta 48 KB sin PSRAM y 1 MB con PSRAM. Las fotos se achican y se
+recomprimen a JPEG en el celular hasta que entran.
 
 ## Arquitectura
 
@@ -82,7 +102,10 @@ components/
   link/          interfaz de transporte de un salto + backend ESP-NOW
   mesh/          flooding con TTL y dedup, vecinos con RSSI, handlers por tipo
   presence/      beacons: directorio de nodos, nombres, ruido, topología
-  messages/      alertas, texto y voz + store (PSRAM si hay) + courier de privados
+  ranging/       distancia a los vecinos: WiFi FTM, o RSSI si no hay
+  messages/      alertas, texto, voz y archivos + store (PSRAM si hay), courier de
+                 privados, repair de bloques perdidos y reproductor
+  call/          llamadas walkie-talkie en vivo
   web/           DNS cautivo, servidor HTTP, API JSON y app web embebida
   ui/            pantallas del OLED (o log en el perfil sin display)
 ```
@@ -91,9 +114,9 @@ Las dependencias van en una sola dirección y cada componente las declara en su
 `CMakeLists.txt`, así el build no deja que una capa use otra que no le toca:
 
 ```
-main ─► ui, web, controls ─► messages, presence ─► mesh ─► link
-                                   │                         ▲
-                                   └─► periph, adpcm      radio (WiFi)
+main ─► ui, web, controls ─► messages, call, presence ─► mesh ─► link
+                                   │        ranging ──────┘        ▲
+                                   └─► periph, adpcm            radio (WiFi)
 ```
 
 Patrones de diseño:
@@ -117,11 +140,28 @@ versión, tipo, TTL, saltos, seq y origen. Cada nodo reenvía una sola vez cada
 
 | Tipo | Payload |
 |---|---|
-| `PRESENCE` | nombre, capacidades, ruido, uptime, vecinos con RSSI (cada ~3 s) |
+| `PRESENCE` | nombre, capacidades, ruido, uptime, vecinos con RSSI y distancia (cada ~3 s) |
 | `ALERT` | tipo de alerta |
 | `TEXT` | origen, ref, destino y hasta 160 bytes UTF-8 |
 | `VOICE` | origen, ref, destino y un bloque de 55 ms de IMA ADPCM a 8 kHz, con su propio estado del códec |
 | `ACK` | origen y ref del privado que llegó |
+| `FILE_INFO` | origen, ref, destino, tamaño, tipo y nombre de un archivo |
+| `FILE` | origen, ref, destino y un pedazo de 220 B de archivo |
+| `NACK` | origen, ref y rangos de bloques que le faltan a alguien (voz o archivo) |
+| `CALL` | señalización de llamada (invitar, atender, colgar, ocupado, ping) y audio en vivo |
+
+**Bloques perdidos.** El flooding no reintenta. Quien tiene una voz o un archivo
+incompleto y deja de recibir durante 1,5 s inunda un `NACK` con los rangos que
+le faltan. Contesta el origen, o cualquier nodo que los tenga si el origen ya no
+está. A una voz le sirve para tapar huecos; a un archivo, para llegar entero.
+
+**Distancia.** Las placas corren el WiFi como AP+STA: el AP contesta FTM
+(802.11mc, tiempo de vuelo) y la STA, que nunca se conecta a nada, lo inicia
+contra un vecino por vez. En campo abierto da ±1–2 m. Si el vecino no contesta,
+se estima con el RSSI, que puede errar al doble o a la mitad. Las distancias
+viajan en los beacons, así que cada nodo conoce la forma de toda la red. Es una
+ubicación relativa: sin GPS no hay coordenadas, y el GPS del celular también
+pide HTTPS.
 
 Como cada bloque de voz se puede decodificar solo, un paquete perdido es un
 silencio de 55 ms y no corta el resto del mensaje. Un mensaje de 20 s son ~360
@@ -183,10 +223,12 @@ cc -I components/adpcm/include test/host/test_adpcm.c components/adpcm/adpcm.c -
 
 ## Opciones (menuconfig)
 
-- *SIGSEV: radio*: canal WiFi y máximo de celulares por nodo.
+- *SIGSEV: radio*: canal WiFi, máximo de celulares por nodo y FTM.
+- *SIGSEV: ranging*: offset de FTM (para calibrar con dos placas a 1 m) y modelo de RSSI.
 - *SIGSEV: mesh*: TTL, jitter de reenvío y timeout de vecinos.
-- *SIGSEV: messages*: duración máxima de voz, memoria para voces y ganancia máxima.
-- *SIGSEV: hardware (periph)*: parlante (apagado: no tenemos) y rotación del display.
+- *SIGSEV: messages*: duración máxima de voz, memoria para voces y archivos, tamaño máximo de archivo
+  y ganancia máxima.
+- *SIGSEV: hardware (periph)*: parlante (prendido; pines y volumen) y rotación del display.
 
 ## Joystick
 
@@ -202,7 +244,7 @@ placa. Los GPIO de `board.h` son los contactos crudos, no las direcciones.
 |------------------------|-----------------------------------------|----------------------|
 | Display SSD1306 (SPI)  | SCL / SDA / CS / DC / RST               | 36 / 37 / 38 / 39 / 40 (solo perfil display) |
 | Micrófono PDM (I2S0)   | CLK / DOUT                              | 7 / 15               |
-| Parlante (I2S1)        | DIN / BCLK / LRCLK                      | 4 / 5 / 6 (no usado) |
+| Parlante MAX98357A (I2S1) | DIN / BCLK / LRCLK                   | 4 / 5 / 6 (configurables) |
 | Joystick               | UP / DOWN / LEFT / RIGHT / CENTER       | 9 / 11 / 12 / 10 / 13 (CENTER no conectado) |
 | Botones                | KEY1 / KEY2 / KEY3 / KEY4               | 14 / 21 / 47 / 48    |
 | Header I²C (placa↔placa) | SDA / SCL                             | 1 / 2                |
