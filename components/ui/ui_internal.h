@@ -5,6 +5,7 @@
 
 #include "call.h"
 #include "messages.h"
+#include "ui.h"
 
 // Estado de la UI que comparten ui.c (eventos) y screens.c (dibujo).
 
@@ -33,6 +34,9 @@ typedef struct {
     uint32_t toast_until_ms;
     message_t toast_msg;
     call_info_t toast_call;  // TOAST_CALL_END
+    ui_kiwi_t kiwi;          // easter egg (tapa todo si no es OFF)
+    uint32_t kiwi_since_ms;
+    uint32_t kiwi_seed;
 } ui_view_t;
 
 // Etiquetas de KEY1..KEY4 que paso la aplicacion (fijas despues de ui_init).
@@ -51,3 +55,6 @@ ui_pick_t screens_draw(const ui_view_t *view);
 
 // Cantidad de filas que tiene la pantalla, para acotar el scroll.
 int screens_rows(screen_t screen);
+
+// Un frame del easter egg (kiwi.c).
+void kiwi_draw(ui_kiwi_t phase, uint32_t elapsed_ms, uint32_t seed);

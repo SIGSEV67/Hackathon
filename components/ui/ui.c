@@ -3,6 +3,7 @@
 #include "display.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "presence.h"
@@ -13,6 +14,7 @@
 static const char *TAG = "ui";
 
 #define FRAME_MS        100
+#define KIWI_FRAME_MS   33   // la animacion pide mas cuadros que el resto
 #define STATUS_LOG_MS   10000
 #define ALERT_TOAST_MS  15000
 #define SENT_TOAST_MS   2000
@@ -112,6 +114,13 @@ static void draw_task(void *arg)
         ui_view_t view = s_view;
         taskEXIT_CRITICAL(&s_lock);
 
+        if (view.kiwi != UI_KIWI_OFF) {
+            kiwi_draw(view.kiwi, mesh_now_ms() - view.kiwi_since_ms, view.kiwi_seed);
+            display_flush();
+            vTaskDelay(pdMS_TO_TICKS(KIWI_FRAME_MS));
+            continue;
+        }
+
         int max_scroll = screens_rows(view.screen) - 1;
         if (max_scroll < 0) {
             max_scroll = 0;
@@ -162,6 +171,16 @@ uint32_t ui_selected_message(void)
     const uint32_t id = s_view.screen == SCREEN_MESSAGES ? s_view.selected_msg : 0;
     taskEXIT_CRITICAL(&s_lock);
     return id;
+}
+
+void ui_kiwi(ui_kiwi_t phase)
+{
+    const uint32_t seed = esp_random();
+    taskENTER_CRITICAL(&s_lock);
+    s_view.kiwi = phase;
+    s_view.kiwi_since_ms = mesh_now_ms();
+    s_view.kiwi_seed = seed;
+    taskEXIT_CRITICAL(&s_lock);
 }
 
 esp_err_t ui_init(const ui_config_t *cfg)
