@@ -1,0 +1,15 @@
+menu "SIGSEV: easter egg"
+
+    config SIGSEV_EASTER_EGG
+        bool "Konami code: the kiwi dances \"6 7\", explodes and reboots the whole mesh"
+        default y
+        help
+            Up Up Down Down Left Right Left Right KEY2 KEY2 on the board (or
+            tools/konami.py over USB) plays the animation, and when the kiwi
+            explodes every other board plays it too and then they all reboot.
+
+            Any board can reboot the whole network with this: turn it off for
+            real use. With it off the board ignores the packet (it still
+            forwards it, like any other).
+
+endmenu

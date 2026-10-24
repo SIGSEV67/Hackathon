@@ -14,6 +14,7 @@
 #include "buttons.h"
 #include "call.h"
 #include "controls.h"
+#include "easter.h"
 #include "link.h"
 #include "mesh.h"
 #include "messages.h"
@@ -92,6 +93,7 @@ void app_main(void)
         ESP_LOGE(TAG, "ui init failed, continuing without screen");
     }
     ESP_ERROR_CHECK(controls_init());
+    ESP_ERROR_CHECK(easter_init());
 
     ESP_LOGI(TAG, "%s up: connect to WiFi \"%s\" for the portal", name, name);
     ESP_LOGI(TAG, "internal RAM free %u KB, largest block %u KB",
