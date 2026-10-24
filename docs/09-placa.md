@@ -216,7 +216,7 @@ despiertan al task (la regla de [02](02-arquitectura.md#concurrencia-los-tasks))
 
 ### El aviso a la red
 
-Un paquete `KIWI` con 4 bytes de magic ([10 · Protocolo](10-protocolo.md#kiwi--eastereasterc)),
+Un paquete `KIWI` con un magic y un **número de ronda** que sortea la líder ([10 · Protocolo](10-protocolo.md#kiwi--eastereasterc)),
 mandado **3 veces** porque el broadcast de ESP-NOW no tiene confirmación. Viaja
 por flooding como cualquier otro: llega a toda la red, no solo a los vecinos.
 
@@ -225,9 +225,17 @@ Lo que evita que esto se descontrole:
 - **Las seguidoras no reenvían el aviso como propio.** La mesh lo reenvía una
   vez como a cualquier paquete, pero solo la líder lo origina: un aviso no genera más avisos.
 - **`s_active`**: una placa que ya está en la secuencia ignora las otras copias.
-- **15 s de gracia al arrancar.** Al reiniciarse, la tabla de deduplicación
+- **La última ronda queda guardada en memoria RTC** (`RTC_NOINIT_ATTR`), que
+  sobrevive a `esp_restart()`. Al reiniciarse, la tabla de deduplicación
   arranca vacía: una copia que siga rebotando por una placa más lenta podría
-  volver a dispararla, y así para siempre. Recién arrancada, la placa ignora `KIWI`.
+  volver a dispararla, y así para siempre. Con la ronda guardada, la placa
+  ignora las copias de *esa* ronda pero acepta una nueva en cualquier momento.
+  Un segundo número fijo al lado distingue lo guardado de la basura que tiene
+  la RTC al encender.
+
+  La primera versión usaba otra cosa: ignorar `KIWI` los primeros 15 s después
+  de arrancar. En placa falló: si se repetía el código enseguida, la otra
+  placa, recién reiniciada por la ronda anterior, lo ignoraba y explotaba una sola.
 
 ### El dibujo (`ui/kiwi.c`)
 

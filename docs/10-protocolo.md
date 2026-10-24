@@ -40,7 +40,7 @@ va en el payload.
 | 8 | `NACK` | messages/repair | 7 + 4·rangos (≤ 167) | cuando algo se traba |
 | 9 | `CALL` | call | 7 (señalización) / 232 (audio) | 1/s al sonar, 1 cada 2 s en llamada, 1 cada 55 ms al hablar |
 | 10 | `CLIENTS` | presence | 1 + 24·celus (≤ 193) | después de cada beacon, si hay celus |
-| 11 | `KIWI` | easter | 4 | 3 copias cuando explota el kiwi (easter egg) |
+| 11 | `KIWI` | easter | 8 | 3 copias cuando explota el kiwi (easter egg) |
 
 ## `PRESENCE` · `presence/presence.c`
 
@@ -142,13 +142,15 @@ la placa con ID `to`.
 | Campo | Tipo | Valor |
 |---|---|---|
 | `magic` | u32 | `0x6977696b` (`"kiwi"` en little-endian) |
+| `round` | u32 | Al azar, lo sortea la placa que empieza; las 3 copias lo comparten |
 
 Lo manda **solo la placa donde se hizo el código**, en el instante de la
 explosión, 3 veces con 40 ms entre copias (el broadcast no tiene ACK). Cada
 copia es un paquete nuevo (`seq` distinto) y viaja por flooding como cualquier
 otro. Quien lo recibe arranca su propia secuencia pero **no lo vuelve a
 originar**: no hay cascada. Se ignora si el magic no coincide, si la placa ya
-está en la secuencia o si arrancó hace menos de 15 s. Con
+está en la secuencia o si ya hizo esa ronda (la última ronda se guarda en
+memoria RTC y sobrevive al reinicio). Con
 `CONFIG_SIGSEV_EASTER_EGG` apagado no hay handler: la placa lo reenvía igual
 (la mesh reenvía antes de despachar) pero no hace nada.
 

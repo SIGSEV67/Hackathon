@@ -170,7 +170,7 @@ versión, tipo, TTL, saltos, seq y origen. Cada nodo reenvía una sola vez cada
 | `FILE` | origen, ref, destino y un pedazo de 220 B de archivo |
 | `NACK` | origen, ref y rangos de bloques que le faltan a alguien (voz o archivo) |
 | `CALL` | señalización de llamada (invitar, atender, colgar, ocupado, ping) y audio en vivo |
-| `KIWI` | easter egg: "explotá y reiniciate" (4 B de magic) |
+| `KIWI` | easter egg: "explotá y reiniciate" (magic y el número de ronda) |
 
 **Bloques perdidos.** El flooding no reintenta. Quien tiene una voz o un archivo
 incompleto y deja de recibir durante 1,5 s inunda un `NACK` con los rangos que

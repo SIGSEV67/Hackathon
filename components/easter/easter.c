@@ -1,6 +1,7 @@
 #include <string.h>
 
 #include "audio.h"
+#include "esp_attr.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_random.h"
@@ -31,18 +32,24 @@ static const char *TAG = "easter";
 #define RESTART_MS     700
 #define COPIES         3     // el broadcast no tiene ACK: mandarlo varias veces
 #define COPY_GAP_MS    40
-// Recien arrancada, la placa ignora el aviso: si una copia de la ronda anterior
-// todavia anda rebotando, no la vuelve a disparar (y asi para siempre).
-#define BOOT_GRACE_MS  15000
 #define KIWI_MAGIC     0x6977696bu  // "kiwi"
+#define ROUND_VALID    0x36373637u  // "6767": distingue lo guardado de la basura del encendido
 
 typedef struct __attribute__((packed)) {
     uint32_t magic;
+    uint32_t round;  // lo sortea la que empieza; las copias de una ronda lo comparten
 } wire_kiwi_t;
 
 static TaskHandle_t s_task;
 static volatile bool s_active;
 static volatile bool s_leader;  // esta placa la empezo: avisa al explotar
+static uint32_t s_round;
+
+// La ultima ronda que hizo esta placa, en memoria RTC: sobrevive a esp_restart.
+// Al volver, una copia de esa ronda que siga rebotando por la red no la vuelve
+// a disparar (y asi para siempre); una ronda nueva si.
+static RTC_NOINIT_ATTR uint32_t s_done_round;
+static RTC_NOINIT_ATTR uint32_t s_done_valid;
 
 static void boom_sound(void)
 {
@@ -68,7 +75,7 @@ static void boom_sound(void)
 
 static void announce(void)
 {
-    const wire_kiwi_t w = {.magic = KIWI_MAGIC};
+    const wire_kiwi_t w = {.magic = KIWI_MAGIC, .round = s_round};
     for (int i = 0; i < COPIES; i++) {
         mesh_send(MESH_TYPE_KIWI, &w, sizeof(w), pdMS_TO_TICKS(50));
         vTaskDelay(pdMS_TO_TICKS(COPY_GAP_MS));
@@ -111,13 +118,21 @@ static void easter_task(void *arg)
     run();
 }
 
-static void start(bool leader)
+static bool already_done(uint32_t round)
+{
+    return s_done_valid == ROUND_VALID && s_done_round == round;
+}
+
+static void start(bool leader, uint32_t round)
 {
     if (s_active) {
         return;
     }
     s_active = true;
     s_leader = leader;
+    s_round = round;
+    s_done_round = round;
+    s_done_valid = ROUND_VALID;
     xTaskNotifyGive(s_task);
 }
 
@@ -128,17 +143,21 @@ static void on_kiwi(const mesh_rx_meta_t *meta, const void *payload, size_t len,
         return;
     }
     memcpy(&w, payload, sizeof(w));
-    if (w.magic != KIWI_MAGIC || mesh_now_ms() < BOOT_GRACE_MS) {
+    if (w.magic != KIWI_MAGIC || already_done(w.round)) {
         return;
     }
-    ESP_LOGW(TAG, "kiwi from %08" PRIx32 " (%u hops)", meta->origin, meta->hops);
-    start(false);
+    ESP_LOGW(TAG, "kiwi from %08" PRIx32 " (%u hops, round %08" PRIx32 ")", meta->origin, meta->hops, w.round);
+    start(false, w.round);
 }
 
 void easter_trigger(void)
 {
     if (s_task) {
-        start(true);
+        uint32_t round;
+        do {
+            round = esp_random();
+        } while (already_done(round));
+        start(true, round);
     }
 }
 
