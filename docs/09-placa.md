@@ -139,6 +139,110 @@ En el perfil `psram` no hay display: `ui_init` arranca en su lugar un task que
 cada 10 s loguea por serie un resumen ("3 nodes in mesh, 2 direct neighbors,
 noise 41"). Las funciones de dibujo son no-op y nunca tocan los GPIO 36/37.
 
+## 4. Easter egg: el kiwi
+
+Con el código Konami el kiwi (el pájaro) baila el "6 7" con las patas y
+explota. Esa placa le avisa a la red, **todas las demás hacen lo mismo** y
+después se reinician todas. Vive en `components/easter/` y se puede sacar
+entero con *menuconfig → SIGSEV: easter egg* (`CONFIG_SIGSEV_EASTER_EGG`,
+prendido por defecto).
+
+### Cómo se dispara
+
+- **En la placa:** ↑ ↑ ↓ ↓ ← → ← → B A. La placa no tiene B ni A: **las dos
+  son KEY2** (la del medio de la fila). Hay que hacerlo con menos de 3 s entre
+  entrada y entrada.
+- **Desde la compu**, porque el joystick no es muy preciso: con la placa por
+  USB, `tools/konami.py [puerto]` manda la línea `konami` por el USB serie.
+  Alcanza con una placa; el resto se entera por la mesh.
+
+Las teclas del código **siguen haciendo lo de siempre** (el joystick mueve
+pantallas y cursores; KEY2 con toque corto solo rechaza una llamada entrante):
+el detector solo mira, no se come los eventos. Por eso B y A tienen que ser
+**toques**: mantener KEY2 1 s manda la alerta MÉDICO.
+
+### Cómo se detecta (`konami.c`)
+
+Escucha `BUTTONS_EVENT_PRESSED` como un suscriptor más del bus de eventos, sin
+que `controls.c` ni la UI se enteren. Guarda **las últimas 10 entradas** y las
+compara enteras contra el código cada vez que llega una. Un autómata que
+vuelve a cero al primer error parecería más simple, pero pierde casos como
+"↑ ↑ ↑ ↓ ↓ …" (el tercer ↑ lo resetea y ya no hay dos ↑ al principio); con la
+ventana deslizante, cualquier secuencia que *termine* en el código vale.
+
+Dos detalles por el joystick:
+
+- **Rotado 45°** (ver [arriba](#el-joystick-rotado-45)): una dirección mal
+  apuntada llega como dos botones casi a la vez. Si una dirección llega a menos
+  de 60 ms de la anterior, se ignora: vale la primera.
+- **Una pausa de más de 3 s** borra lo acumulado, para que restos de navegar
+  la UI no completen un código por accidente.
+
+### Comandos por USB (`serial.c`)
+
+La consola de la placa es el USB-Serial-JTAG del ESP32-S3. Para *leer* de ahí
+hay que instalar su driver (`usb_serial_jtag_driver_install`) y pasarle la
+consola (`usb_serial_jtag_vfs_use_driver`). Efecto secundario bueno: con el
+driver, si no hay una compu leyendo, el log descarta lo que no sale en 50 ms en
+vez de trabarse.
+
+El task `serial_cmd` junta bytes hasta un fin de línea y compara (sin
+mayúsculas ni espacios) con `konami`. Cualquier otra cosa loguea *unknown
+command*. `tools/konami.py` abre el puerto **sin tocar DTR/RTS** (esa
+combinación es la que resetea la placa), manda la línea y muestra 2 s de log
+para confirmar que llegó.
+
+Se eligió USB y no un botón en la web a propósito: así hace falta tener la
+placa en la mano; desde un celu no se puede reiniciar la red.
+
+### La secuencia (`easter.c`)
+
+| Fase | Duración | Pantalla (`ui_kiwi`) | Sonido (si hay parlante) |
+|---|---|---|---|
+| Baile | 8 tiempos de 300 ms (2,4 s) | El kiwi levanta la pata izquierda con un "6" grande, después la derecha con un "7" | Un tono por tiempo: mi para el 6, sol para el 7 |
+| Explosión | 1,8 s | Destello, 48 partículas que salen del cuerpo y caen, onda expansiva y "BOOM!" | Ruido filtrado que se apaga en 0,9 s |
+| Reinicio | 0,7 s | "reiniciando..." | — |
+
+Después, `esp_restart()`.
+
+La placa donde se hizo el código (la *líder*) manda el aviso **al explotar**,
+no al empezar: así las otras empiezan a bailar justo cuando la líder explota, y
+el efecto es una ola que recorre la red. Las seguidoras hacen la secuencia
+entera y se reinician ~2,5 s después que la líder.
+
+Corre en su propio task (`easter`), que duerme en una notificación hasta que
+hace falta. Ni el handler de la mesh ni el de los botones bloquean: solo
+despiertan al task (la regla de [02](02-arquitectura.md#concurrencia-los-tasks)).
+
+### El aviso a la red
+
+Un paquete `KIWI` con 4 bytes de magic ([10 · Protocolo](10-protocolo.md#kiwi--eastereasterc)),
+mandado **3 veces** porque el broadcast de ESP-NOW no tiene confirmación. Viaja
+por flooding como cualquier otro: llega a toda la red, no solo a los vecinos.
+
+Lo que evita que esto se descontrole:
+
+- **Las seguidoras no reenvían el aviso como propio.** La mesh lo reenvía una
+  vez como a cualquier paquete, pero solo la líder lo origina: un aviso no genera más avisos.
+- **`s_active`**: una placa que ya está en la secuencia ignora las otras copias.
+- **15 s de gracia al arrancar.** Al reiniciarse, la tabla de deduplicación
+  arranca vacía: una copia que siga rebotando por una placa más lenta podría
+  volver a dispararla, y así para siempre. Recién arrancada, la placa ignora `KIWI`.
+
+### El dibujo (`ui/kiwi.c`)
+
+El kiwi se dibuja con primitivas (elipses rellenas, líneas de Bresenham con
+grosor, píxeles sueltos), sin bitmaps: cuerpo con textura de plumas, cabeza,
+ojo, el pico largo y fino, y patas con rodilla. Cada frame depende **solo del
+tiempo desde que arrancó la fase** (y, en la explosión, de una semilla), así
+el dibujo no guarda estado: las partículas se recalculan en cada frame desde la
+misma semilla con un generador lineal congruencial, y siempre caen igual.
+
+`ui_kiwi(fase)` es la única entrada: guarda la fase en la vista y el task de la
+UI, mientras la fase no es `OFF`, dibuja eso a ~30 fps (33 ms por frame) en vez
+de las pantallas normales. Por eso tapa todo, incluso una alerta. Sin display
+(perfil `psram`) la secuencia corre igual, se loguea y se reinicia: solo no se ve.
+
 ## Referencias de esta parte
 
 - [GPIO e interrupciones en ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/api-reference/peripherals/gpio.html).

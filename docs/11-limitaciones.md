@@ -104,6 +104,10 @@ rebota, y se reenvía otra vez.
 - **El modo walkie** depende de que el navegador permita reproducir solo: si la
   página quedó en segundo plano, puede no sonar.
 - **La distancia por RSSI** puede errar al doble o a la mitad; la de FTM no está calibrada.
+- **El easter egg reinicia toda la red** y viene prendido. Cualquiera con una
+  placa (o que arme un paquete `KIWI`) puede tirar la red ~5 s; los mensajes
+  guardados en RAM se pierden con el reinicio. Para uso real, apagar
+  `CONFIG_SIGSEV_EASTER_EGG`: así la placa ni siquiera tiene el handler.
 
 ## 6. Qué está probado y qué no
 
@@ -111,7 +115,7 @@ rebota, y se reenvía otra vez.
 |---|---|
 | **Probado en placa** (2 placas) | Arranque, descubrimiento mutuo (~3 s), mesh, pantalla en las dos, joystick con la corrección de 45°, FTM entre placas (13–14 mediciones válidas por sesión), inicialización del parlante |
 | **Usado en versiones anteriores**; confirmar y reprobar después de los últimos cambios | Alertas, texto y voz entre placas; privados entre placas |
-| **Solo compilado** | Reproducción por parlante (no había parlante conectado), llamadas, audio desde el celu, fotos y archivos, reparación de bloques, grabaciones largas con segmentos, FTM a 3–5 m |
+| **Solo compilado** | Easter egg (código, comando por USB, aviso a la red), reproducción por parlante (no había parlante conectado), llamadas, audio desde el celu, fotos y archivos, reparación de bloques, grabaciones largas con segmentos, FTM a 3–5 m |
 | **Compilado y probado contra una API simulada** (en la PC), no en placa | Todo el modelo de clientes: identidad del celu, privados celu a celu, ✓/✓✓, cambio de placa, walkie por clips |
 
 ## 7. Deuda técnica

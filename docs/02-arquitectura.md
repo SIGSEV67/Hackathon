@@ -36,8 +36,10 @@ flowchart TD
     periph["periph<br/>display, mic, parlante, botones"]
     adpcm["adpcm<br/>códec (C puro)"]
     board["board<br/>pines"]
+    easter["easter<br/>código Konami, el kiwi"]
 
-    main --> ui & web & messages & call & presence & ranging & noise & radio
+    main --> ui & web & messages & call & presence & ranging & noise & radio & easter
+    easter --> ui & mesh & periph
     ui --> messages & call & presence & periph
     web --> messages & presence & periph
     messages --> presence & mesh & periph & adpcm
@@ -69,6 +71,7 @@ pasa `main`) o con *eventos* (ver patrones).
 | `call` | Llamadas en vivo entre placas. | `call.c` |
 | `web` | DNS cautivo, servidor HTTP, API JSON, app embebida. | `web.c`, `dns.c`, `api.c`, `www/` |
 | `ui` | Pantallas del OLED (o un log periódico si no hay pantalla). | `ui.c`, `screens.c` |
+| `easter` | Easter egg: detecta el código Konami (o el comando por USB), anima el kiwi, avisa a la red y reinicia. Se puede sacar entero por Kconfig. | `easter.c`, `konami.c`, `serial.c` |
 | `main` | Arranque en orden y el mapa de teclas. | `main.c`, `controls.c` |
 
 ### ¿Por qué `periph` y no `hal`?
@@ -176,10 +179,12 @@ protegida). Prioridad más alta = corre primero. Estos son los del proyecto:
 | `httpd` | 5 | 6 KB | Servidor web (uno solo atiende todos los pedidos) | `web/web.c` |
 | `courier` | 4 | 4 KB | Reenvía privados pendientes | `messages/courier.c` |
 | `presence` | 4 | 3 KB | Manda el beacon y la lista de celus | `presence/presence.c` |
+| `easter` | 4 | 3 KB | Duerme hasta el código Konami; corre el baile, la explosión y el reinicio | `easter/easter.c` |
 | `repair` | 3 | 3 KB | Detecta mensajes trabados y pide lo que falta | `messages/repair.c` |
 | `ui` | 3 | 4 KB | Dibuja la pantalla a 10 fps | `ui/ui.c` |
 | `dns` | 3 | 3 KB | DNS cautivo | `web/dns.c` |
 | `ranging` | 2 | 3 KB | Mide distancia a un vecino cada 2,5 s | `ranging/ranging.c` |
+| `serial_cmd` | 2 | 3 KB | Lee comandos por el USB serie (`konami`) | `easter/serial.c` |
 
 Criterios de las prioridades:
 
@@ -214,7 +219,7 @@ encolan para su propio task (`sender_post`, `post_job`).
 5. `radio_init(nombre)`: levanta el WiFi con el SSID = nombre de la placa. Por eso la
    mesh se inicializa antes: el nombre por defecto sale de su ID.
 6. `mesh_start`: arranca ESP-NOW y la recepción. Recién ahí salen paquetes.
-7. `ranging_init`, `web_init`, `ui_init`, `controls_init`.
+7. `ranging_init`, `web_init`, `ui_init`, `controls_init`, `easter_init`.
 
 Los handlers se registran (paso 4) **antes** de que la radio reciba nada
 (paso 6), así ningún paquete llega a un tipo sin dueño.
@@ -250,7 +255,8 @@ config SIGSEV_VOICE_STORE_KB
 Todo lo ajustable está en Kconfig (`idf.py menuconfig` → menús *SIGSEV: …*), no
 en `#define` sueltos: canal WiFi, celus por placa, TTL, jitter de reenvío,
 timeout de vecinos, largo de voz, memoria, tamaño de archivo, ganancia,
-parlante (pines y volumen), rotación del display, calibración de distancia. Así
+parlante (pines y volumen), rotación del display, calibración de distancia,
+easter egg. Así
 se cambia sin tocar código y cada opción tiene su ayuda.
 
 Algunas opciones de ESP-IDF que el proyecto cambia (`sdkconfig.defaults`):

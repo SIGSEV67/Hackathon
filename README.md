@@ -126,6 +126,8 @@ components/
   call/          llamadas walkie-talkie en vivo
   web/           DNS cautivo, servidor HTTP, API JSON y app web embebida
   ui/            pantallas del OLED (o log en el perfil sin display)
+  easter/        easter egg: código Konami, el kiwi y el reinicio de toda la red
+tools/           konami.py: dispara el easter egg desde la compu
 ```
 
 Las dependencias van en una sola dirección y cada componente las declara en su
@@ -168,6 +170,7 @@ versión, tipo, TTL, saltos, seq y origen. Cada nodo reenvía una sola vez cada
 | `FILE` | origen, ref, destino y un pedazo de 220 B de archivo |
 | `NACK` | origen, ref y rangos de bloques que le faltan a alguien (voz o archivo) |
 | `CALL` | señalización de llamada (invitar, atender, colgar, ocupado, ping) y audio en vivo |
+| `KIWI` | easter egg: "explotá y reiniciate" (4 B de magic) |
 
 **Bloques perdidos.** El flooding no reintenta. Quien tiene una voz o un archivo
 incompleto y deja de recibir durante 1,5 s inunda un `NACK` con los rangos que
@@ -253,6 +256,7 @@ cc -I components/adpcm/include test/host/test_adpcm.c components/adpcm/adpcm.c -
 - *SIGSEV: messages*: duración máxima de voz, memoria para voces y archivos, tamaño máximo de archivo
   y ganancia máxima.
 - *SIGSEV: hardware (periph)*: parlante (prendido; pines y volumen) y rotación del display.
+- *SIGSEV: easter egg*: prende el easter egg (prendido por defecto; apagarlo para uso real).
 
 ## Joystick
 
@@ -261,6 +265,24 @@ El joystick está montado rotado: cada contacto queda en una diagonal física
 lo compensa con la tabla `s_joy_dir`, así `BTN_UP/DOWN/LEFT/RIGHT` reportan la
 dirección física. Una diagonal se reporta como dos botones. Está verificado en
 placa. Los GPIO de `board.h` son los contactos crudos, no las direcciones.
+
+## Easter egg
+
+Con el código Konami en la placa (**↑ ↑ ↓ ↓ ← → ← → B A**, con B = A = **KEY2**)
+el kiwi de la pantalla baila el "6 7" levantando una pata y la otra, y explota.
+En ese momento la placa avisa por la mesh, **todas las demás hacen lo mismo** y
+después se reinician todas.
+
+El joystick no es muy preciso, así que también se puede disparar desde la compu,
+con la placa conectada por USB (alcanza con una):
+
+```sh
+. ~/Hackathon/esp-idf/export.sh   # por pyserial
+tools/konami.py /dev/ttyACM0
+```
+
+Se apaga en *menuconfig → SIGSEV: easter egg*. Detalle en
+[docs/09](docs/09-placa.md#4-easter-egg-el-kiwi).
 
 ## Pines
 

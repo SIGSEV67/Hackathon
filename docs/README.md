@@ -49,4 +49,5 @@ código; si se cambia una constante, conviene actualizar el documento.
 | **ADPCM** | Códec de audio simple: 4 bits por muestra. |
 | **FTM** | *Fine Timing Measurement* (802.11mc): medir distancia por tiempo de vuelo del WiFi. |
 | **RSSI** | Potencia con la que llega una señal (dBm). Sirve para estimar distancia, mal. |
+| **Kiwi** | El easter egg: código Konami → el kiwi baila, explota y reinicia toda la red. Ver [09](09-placa.md#4-easter-egg-el-kiwi). |
 | **Perfil** | Variante del firmware: `psram` (8 MB de RAM extra, sin pantalla) o `display` (con pantalla, sin PSRAM). |

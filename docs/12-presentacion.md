@@ -43,6 +43,7 @@ ponerles nombre (*Vos → Tu nombre*).
 | 6 | Apagar la placa de B, mandarle otro privado desde A, volver a prenderla | El mensaje llega solo cuando B vuelve | Store-and-forward: el destino no tenía que estar |
 | 7 | Mandar una foto desde un celu | Aparece en el otro | Algo imposible con LoRa |
 | 8 | (Con parlante) Llamada entre placas con KEY1 + KEY4 | Walkie en vivo | Voz en tiempo real por la mesh |
+| 9 | Cierre: código Konami en una placa (o `tools/konami.py`) | El kiwi baila el "6 7", explota y **todas** las placas lo repiten y se reinician | Un solo paquete llega a toda la red en milisegundos; y se vuelven a encontrar solas en ~3 s |
 
 Plan B si algo falla en vivo: tener grabado un video corto de la demo y las
 capturas de la web con la API simulada (`docs/` + un servidor mock).
