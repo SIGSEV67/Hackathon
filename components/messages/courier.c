@@ -150,7 +150,7 @@ static void schedule(track_t *t, uint32_t now)
 
 static void resend(const message_t *msg)
 {
-    static const char *const names[] = {[MESSAGE_TEXT] = "text", [MESSAGE_VOICE] = "voice", [MESSAGE_FILE] = "file"};
+    static const char *const names[] = {[MESSAGE_TEXT] = "text", [MESSAGE_VOICE] = "voice"};
     esp_err_t err = ESP_ERR_NOT_SUPPORTED;
     switch (msg->kind) {
     case MESSAGE_TEXT:
@@ -158,9 +158,6 @@ static void resend(const message_t *msg)
         break;
     case MESSAGE_VOICE:
         err = voice_resend(msg);
-        break;
-    case MESSAGE_FILE:
-        err = files_resend(msg);
         break;
     case MESSAGE_ALERT:
         break;

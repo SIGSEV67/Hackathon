@@ -24,8 +24,7 @@ typedef enum {
     MESH_TYPE_TEXT = 3,
     MESH_TYPE_VOICE = 4,
     MESH_TYPE_ACK = 5,
-    MESH_TYPE_FILE_INFO = 6,
-    MESH_TYPE_FILE = 7,
+    // 6 y 7 eran archivos: quedan libres para no cambiar los demas numeros
     MESH_TYPE_NACK = 8,
     MESH_TYPE_CALL = 9,
     MESH_TYPE_CLIENTS = 10,

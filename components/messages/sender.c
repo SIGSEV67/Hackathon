@@ -6,9 +6,9 @@
 
 #include "internal.h"
 
-// Task que manda rangos de bloques de una voz o un archivo: envios de archivos
-// nuevos, reenvios del courier y respuestas a pedidos de bloques perdidos. Los
-// manda espaciados para dejarles aire a los reenvios de los vecinos.
+// Task que manda rangos de bloques de una voz: reenvios del courier y
+// respuestas a pedidos de bloques perdidos. Los manda espaciados para dejarles
+// aire a los reenvios de los vecinos.
 
 static const char *TAG = "sender";
 
@@ -19,25 +19,15 @@ typedef struct {
     uint32_t id;
     uint16_t start;
     uint16_t count;
-    bool info;
 } job_t;
 
 static QueueHandle_t s_jobs;
 
-static esp_err_t send_block(const message_t *msg, uint16_t index, const block_t *block)
-{
-    return msg->kind == MESSAGE_FILE ? files_send_chunk(msg, index, block) : voice_send_block(msg, index, block);
-}
-
 static void run(const job_t *job)
 {
     message_t msg;
-    if (!store_get(job->id, &msg) || (msg.kind != MESSAGE_VOICE && msg.kind != MESSAGE_FILE)) {
+    if (!store_get(job->id, &msg) || msg.kind != MESSAGE_VOICE) {
         return;
-    }
-    if (job->info && msg.kind == MESSAGE_FILE && msg.file_size) {
-        files_send_info(&msg);
-        vTaskDelay(pdMS_TO_TICKS(SEND_SPACING_MS));
     }
     const uint32_t end = (uint32_t)job->start + job->count;
     uint16_t sent = 0;
@@ -46,7 +36,7 @@ static void run(const job_t *job)
         if (store_block_get(msg.id, i, &block) != ESP_OK) {
             return;  // se borro
         }
-        if (block.present && send_block(&msg, i, &block) == ESP_OK) {
+        if (block.present && voice_send_block(&msg, i, &block) == ESP_OK) {
             sent++;
             vTaskDelay(pdMS_TO_TICKS(SEND_SPACING_MS));
         }
@@ -75,9 +65,9 @@ esp_err_t sender_init(void)
     return ESP_OK;
 }
 
-void sender_post(uint32_t id, uint16_t start, uint16_t count, bool info)
+void sender_post(uint32_t id, uint16_t start, uint16_t count)
 {
-    const job_t job = {.id = id, .start = start, .count = count, .info = info};
+    const job_t job = {.id = id, .start = start, .count = count};
     if (xQueueSend(s_jobs, &job, 0) != pdTRUE) {
         ESP_LOGW(TAG, "queue full, dropped job for %" PRIu32, id);
     }

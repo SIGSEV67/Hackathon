@@ -8,8 +8,7 @@
 //   voice.c    grabacion, envio, recepcion y reproduccion de voz
 //   courier.c  custodia de privados: reenvio al destino y ACKs
 //   player.c   reproduccion en el parlante
-//   files.c    archivos: formato en el aire, subida y lectura
-//   sender.c   task que manda rangos de bloques (voz o archivo)
+//   sender.c   task que manda rangos de bloques de una voz
 //   repair.c   pedido de bloques perdidos (NACK) y respuesta
 //   store.c    donde queda todo
 
@@ -17,7 +16,6 @@ esp_err_t alerts_init(void);
 esp_err_t voice_init(void);
 esp_err_t courier_init(void);
 esp_err_t player_init(void);
-esp_err_t files_init(void);
 esp_err_t sender_init(void);
 esp_err_t repair_init(void);
 
@@ -39,17 +37,13 @@ uint16_t messages_next_ref(void);
 // mandan los bloques que tengamos (un custodio puede tener una copia parcial).
 esp_err_t alerts_resend_text(const message_t *msg);
 esp_err_t voice_resend(const message_t *msg);
-esp_err_t files_resend(const message_t *msg);
 
-// Un bloque de voz o un pedazo de archivo, en el formato de su tipo.
+// Un bloque de voz en el formato del aire.
 esp_err_t voice_send_block(const message_t *msg, uint16_t index, const block_t *block);
-esp_err_t files_send_chunk(const message_t *msg, uint16_t index, const block_t *block);
-esp_err_t files_send_info(const message_t *msg);
 
-// Encola el envio de los bloques [start, start + count) que tengamos del
-// mensaje (con info = true, para un archivo, antes manda sus datos). No bloquea:
-// si la cola esta llena, se descarta (el que pidio vuelve a pedir).
-void sender_post(uint32_t id, uint16_t start, uint16_t count, bool info);
+// Encola el envio de los bloques [start, start + count) que tengamos de una
+// voz. No bloquea: si la cola esta llena, se descarta (el que pidio vuelve a pedir).
+void sender_post(uint32_t id, uint16_t start, uint16_t count);
 
 // Avisos al courier:
 //   llego un privado para nosotros (o un repetido): confirmar al origen

@@ -111,9 +111,6 @@ static void describe(const message_t *m, char *out, size_t len)
     case MESSAGE_VOICE:
         snprintf(out, len, "VOZ %us", m->blocks * MESSAGES_VOICE_BLOCK_SAMPLES / MESSAGES_VOICE_SAMPLE_RATE);
         break;
-    case MESSAGE_FILE:
-        snprintf(out, len, "ARCH %s", m->text[0] ? m->text : "...");
-        break;
     }
 }
 
@@ -232,7 +229,6 @@ static uint32_t draw_messages(int cursor)
         const char mark = m->kind == MESSAGE_ALERT          ? '!'
                           : m->dest != MESSAGES_TO_ALL       ? '@'  // privado
                           : m->kind == MESSAGE_VOICE         ? (m->id == playing ? '*' : '>')
-                          : m->kind == MESSAGE_FILE          ? '#'
                                                              : '"';
         snprintf(line, sizeof(line), "%c%-3s %s", mark, when, what);
         text(1, LIST_Y + row * ROW_H, line, m->kind == MESSAGE_ALERT && m->alert != ALERT_SAFE);
@@ -431,9 +427,8 @@ ui_pick_t screens_draw(const ui_view_t *view)
         describe(tm, what, sizeof(what));
         presence_name_of(tm->origin, who, sizeof(who));
         snprintf(title, sizeof(title), "%s %s", tm->dest ? "PRIVADO de" : "de", who);
-        draw_box(title, tm->kind == MESSAGE_VOICE  ? (audio_has_speaker() ? "VOZ: 4 en Mensajes" : "VOZ: oir en el celu")
-                        : tm->kind == MESSAGE_FILE ? "ARCHIVO: ver en el celu"
-                                                   : what);
+        draw_box(title, tm->kind == MESSAGE_VOICE ? (audio_has_speaker() ? "VOZ: 4 en Mensajes" : "VOZ: oir en el celu")
+                                                  : what);
         break;
     case TOAST_CALL_END: {
         static const char *const reasons[] = {

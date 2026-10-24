@@ -141,7 +141,6 @@ h2 { margin: 30px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--li
 .feed .play { margin-top: 6px; padding: 4px 10px; background: none; border: 1px solid var(--gold); color: var(--bright);
               cursor: pointer; font-size: 13px; }
 .feed .actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.feed .thumb { display: block; margin-top: 8px; max-width: 100%; max-height: 260px; border: 1px solid var(--line); }
 .feed a.play { display: inline-block; text-decoration: none; }
 .nota.small { margin: 0; font-size: 11px; }
 .feed .play:disabled { border-style: dashed; border-color: var(--line); color: var(--muted); cursor: default; }

@@ -13,7 +13,7 @@ static const char *TAG = "store";
 
 #define MAX_MESSAGES STORE_MAX_MESSAGES
 
-// Los bloques de una voz o archivo van en segmentos chicos que se reservan
+// Los bloques de una voz van en segmentos chicos que se reservan
 // cuando llega el primer bloque de cada uno: una grabacion ocupa lo grabado
 // (no el largo maximo) y sin PSRAM no hace falta un bloque contiguo grande.
 #define SEG_BLOCKS 32
@@ -86,7 +86,7 @@ static slot_t *push(const message_t *msg)
     return slot;
 }
 
-// Libera la voz o archivo mas viejo, salvo `keep` (el que se esta llenando).
+// Libera la voz mas vieja, salvo `keep` (el que se esta llenando).
 static bool evict_oldest_blocks(const slot_t *keep)
 {
     for (int i = 0; i < MAX_MESSAGES; i++) {
@@ -105,7 +105,7 @@ esp_err_t store_init(size_t voice_budget_bytes)
     s_lock = xSemaphoreCreateMutex();
     ESP_RETURN_ON_FALSE(s_lock, ESP_ERR_NO_MEM, TAG, "no mem for lock");
     s_blocks_budget = voice_budget_bytes;
-    ESP_LOGI(TAG, "%d messages, %u KB for voice and files (%s)", MAX_MESSAGES, (unsigned)(voice_budget_bytes / 1024),
+    ESP_LOGI(TAG, "%d messages, %u KB for voice (%s)", MAX_MESSAGES, (unsigned)(voice_budget_bytes / 1024),
              heap_caps_get_total_size(MALLOC_CAP_SPIRAM) ? "PSRAM" : "internal RAM");
     return ESP_OK;
 }
@@ -367,17 +367,4 @@ size_t store_missing(uint32_t id, block_range_t *out, size_t max)
     }
     UNLOCK();
     return n;
-}
-
-bool store_set_file_info(uint32_t id, uint32_t size, const char *name, const char *mime)
-{
-    LOCK();
-    slot_t *slot = find(id);
-    if (slot) {
-        slot->msg.file_size = size;
-        strlcpy(slot->msg.text, name, sizeof(slot->msg.text));
-        strlcpy(slot->msg.mime, mime, sizeof(slot->msg.mime));
-    }
-    UNLOCK();
-    return slot != NULL;
 }

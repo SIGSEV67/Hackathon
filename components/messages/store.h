@@ -20,7 +20,7 @@ esp_err_t store_init(size_t voice_budget_bytes);
 // Agrega una alerta o texto (msg->id se ignora). Pisa al mas viejo si esta lleno.
 esp_err_t store_add(const message_t *msg, uint32_t *out_id);
 
-// Agrega una voz o archivo con msg->blocks bloques vacios. Si no hay memoria,
+// Agrega una voz con msg->blocks bloques vacios. Si no hay memoria,
 // libera los mas viejos que tengan bloques.
 esp_err_t store_add_blocks(const message_t *msg, uint32_t *out_id);
 
@@ -66,5 +66,3 @@ typedef struct {
 // Rangos de bloques que faltan de un mensaje. Devuelve cuantos rangos copio.
 size_t store_missing(uint32_t id, block_range_t *out, size_t max);
 
-// Actualiza los datos de un archivo (llegan aparte de los bloques).
-bool store_set_file_info(uint32_t id, uint32_t size, const char *name, const char *mime);

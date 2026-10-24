@@ -9,8 +9,7 @@
 #include "internal.h"
 
 // Bloques perdidos. El flooding no tiene reintentos: a una voz le puede faltar
-// algun bloque (se oye un hueco de 55 ms) y a un archivo no le puede faltar
-// ninguno. Quien tiene un mensaje incompleto y deja de recibir pide los rangos
+// algun bloque (se oye un hueco de 55 ms). Quien tiene un mensaje incompleto y deja de recibir pide los rangos
 // que le faltan (NACK). Contesta el origen; si el origen ya no esta en la red,
 // cualquiera que tenga esos bloques (puede haber algun duplicado: el store los
 // descarta).
@@ -26,7 +25,7 @@ static const char *TAG = "repair";
 typedef struct __attribute__((packed)) {
     uint32_t origin;
     uint16_t ref;
-    uint8_t n_ranges;  // 0 = solo los datos del archivo
+    uint8_t n_ranges;
     block_range_t ranges[MAX_RANGES];
 } wire_nack_t;
 
@@ -42,13 +41,12 @@ typedef struct {
 static track_t s_tracks[STORE_MAX_MESSAGES];
 static uint32_t s_ids[STORE_MAX_MESSAGES];  // solo el task de repair
 
-// Voz o archivo a medio llegar que este nodo quiere completar: le interesa a
+// Voz a medio llegar que este nodo quiere completar: le interesa a
 // la placa o a sus celus, y no salio de aca.
 static bool wants_repair(const message_t *m)
 {
-    return (m->kind == MESSAGE_VOICE || m->kind == MESSAGE_FILE) && messages_is_local(m) &&
-           m->origin != mesh_self_id() && !presence_is_local_client(m->origin) &&
-           (m->blocks_received < m->blocks || (m->kind == MESSAGE_FILE && m->file_size == 0));
+    return m->kind == MESSAGE_VOICE && messages_is_local(m) && m->origin != mesh_self_id() &&
+           !presence_is_local_client(m->origin) && m->blocks_received < m->blocks;
 }
 
 static track_t *track_of(uint32_t id)
@@ -131,19 +129,15 @@ static void on_nack(const mesh_rx_meta_t *meta, const void *payload, size_t len,
         return;  // contesta el origen
     }
     ESP_LOGI(TAG, "%08" PRIx32 " asked for %u ranges of %08" PRIx32 "/%u", meta->origin, w.n_ranges, w.origin, w.ref);
-    if (w.n_ranges == 0) {
-        sender_post(id, 0, 0, true);
-        return;
-    }
     if (w.n_ranges > MAX_JOBS) {
         // Muchos huecos: un solo envio de punta a punta (manda tambien lo que
         // ya tenia, pero no llena la cola del sender).
         const block_range_t last = w.ranges[w.n_ranges - 1];
-        sender_post(id, w.ranges[0].start, last.start + last.count - w.ranges[0].start, true);
+        sender_post(id, w.ranges[0].start, last.start + last.count - w.ranges[0].start);
         return;
     }
     for (uint8_t i = 0; i < w.n_ranges; i++) {
-        sender_post(id, w.ranges[i].start, w.ranges[i].count, i == 0);
+        sender_post(id, w.ranges[i].start, w.ranges[i].count);
     }
 }
 

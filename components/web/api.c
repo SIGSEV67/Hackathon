@@ -10,9 +10,6 @@
 //   POST /api/name              renombra la placa con el body
 //   POST /api/voice?to=ID       manda el body (PCM 16 bits mono, 8 kHz) como voz
 //   POST /api/play?id=N         reproduce una voz en el parlante de la placa
-//   GET  /api/file?id=N         baja un archivo recibido
-//   POST /api/file?to=ID        manda el body como archivo. Content-Type es su tipo y
-//                               X-File-Name su nombre (URL-encoded)
 
 #include <stdlib.h>
 #include <string.h>
@@ -225,8 +222,8 @@ static esp_err_t get_state(httpd_req_t *req)
         json_raw(&out, "}");
     }
     free(known);
-    json_fmt(&out, "],\"transit\":%u,\"voice_max_s\":%d,\"file_max\":%u,\"speaker\":%s}",
-             (unsigned)messages_transit_count(), CONFIG_SIGSEV_VOICE_MAX_S, (unsigned)messages_file_max_bytes(),
+    json_fmt(&out, "],\"transit\":%u,\"voice_max_s\":%d,\"speaker\":%s}",
+             (unsigned)messages_transit_count(), CONFIG_SIGSEV_VOICE_MAX_S,
              audio_has_speaker() ? "true" : "false");
     return json_end(&out);
 }
@@ -240,8 +237,6 @@ static const char *kind_name(message_kind_t kind)
         return "text";
     case MESSAGE_VOICE:
         return "voice";
-    case MESSAGE_FILE:
-        return "file";
     }
     return "?";
 }
@@ -298,13 +293,6 @@ static esp_err_t get_messages(httpd_req_t *req)
         case MESSAGE_VOICE:
             json_fmt(&out, ",\"blocks\":%u,\"got\":%u,\"ms\":%u", m->blocks, m->blocks_received,
                      m->blocks * MESSAGES_VOICE_BLOCK_SAMPLES * 1000 / MESSAGES_VOICE_SAMPLE_RATE);
-            break;
-        case MESSAGE_FILE:
-            json_fmt(&out, ",\"blocks\":%u,\"got\":%u,\"size\":%" PRIu32 ",\"name\":", m->blocks,
-                     m->blocks_received, m->file_size);
-            json_str(&out, m->text);
-            json_raw(&out, ",\"mime\":");
-            json_str(&out, m->mime);
             break;
         }
         json_raw(&out, "}");
@@ -377,34 +365,6 @@ static esp_err_t get_voice(httpd_req_t *req)
             memset(pcm, 0, sizeof(pcm));  // el mensaje se borro a mitad: completar con silencio
         }
         ESP_RETURN_ON_ERROR(httpd_resp_send_chunk(req, (const char *)pcm, sizeof(pcm)), TAG, "send failed");
-    }
-    return httpd_resp_send_chunk(req, NULL, 0);
-}
-
-static esp_err_t get_file(httpd_req_t *req)
-{
-    long id;
-    message_t msg;
-    mesh_node_id_t client;
-    if (!client_of(req, &client)) {
-        return reply_no_client(req);
-    }
-    if (!query_int(req, "id", &id) || !messages_get(id, &msg) || msg.kind != MESSAGE_FILE ||
-        !messages_for_client(&msg, client)) {
-        return reply_error(req, "404 Not Found", "no such file");
-    }
-    if (msg.file_size == 0 || msg.blocks_received < msg.blocks) {
-        return reply_error(req, "409 Conflict", "file still arriving");
-    }
-    httpd_resp_set_type(req, msg.mime[0] ? msg.mime : "application/octet-stream");
-    httpd_resp_set_hdr(req, "Cache-Control", "private, max-age=86400");  // un id no cambia de contenido
-    uint8_t chunk[MESSAGES_FILE_CHUNK];
-    for (uint16_t i = 0; i < msg.blocks; i++) {
-        size_t len;
-        if (messages_file_read(id, i, chunk, &len) != ESP_OK) {
-            break;  // se borro a mitad: el archivo sale cortado
-        }
-        ESP_RETURN_ON_ERROR(httpd_resp_send_chunk(req, (const char *)chunk, len), TAG, "send failed");
     }
     return httpd_resp_send_chunk(req, NULL, 0);
 }
@@ -516,42 +476,6 @@ static esp_err_t post_voice(httpd_req_t *req)
     return reply_ok(req);
 }
 
-static esp_err_t post_file(httpd_req_t *req)
-{
-    mesh_node_id_t client, to;
-    if (!client_of(req, &client)) {
-        return reply_no_client(req);
-    }
-    if (!query_dest(req, &to) || to == client) {
-        return reply_error(req, "400 Bad Request", "bad destination");
-    }
-    if (req->content_len == 0 || req->content_len > messages_file_max_bytes()) {
-        return reply_error(req, "413 Payload Too Large", "file too big");
-    }
-    char mime[MESSAGES_MIME_MAX + 1] = "";
-    char name[MESSAGES_FILE_NAME_MAX * 3 + 1] = "";  // URL-encoded: hasta 3 bytes por byte
-    httpd_req_get_hdr_value_str(req, "Content-Type", mime, sizeof(mime));
-    httpd_req_get_hdr_value_str(req, "X-File-Name", name, sizeof(name));
-    url_decode(name);
-    name[MESSAGES_FILE_NAME_MAX] = '\0';
-
-    uint32_t id;
-    if (messages_file_begin(client, to, name, mime, req->content_len, &id) != ESP_OK) {
-        return reply_error(req, "503 Service Unavailable", "no room for file");
-    }
-    static uint8_t buf[1024];  // un solo task de httpd
-    bool ok = true;
-    for (size_t left = req->content_len; left > 0 && ok;) {
-        const size_t n = left < sizeof(buf) ? left : sizeof(buf);
-        ok = recv_exact(req, buf, n) && messages_file_write(id, buf, n) == ESP_OK;
-        left -= n;
-    }
-    if (messages_file_end(id, ok) != ESP_OK) {
-        return reply_error(req, "400 Bad Request", "upload failed");
-    }
-    return reply_ok(req);
-}
-
 static esp_err_t post_play(httpd_req_t *req)
 {
     mesh_node_id_t client;
@@ -592,8 +516,6 @@ esp_err_t api_register(httpd_handle_t server)
         {.uri = "/api/text", .method = HTTP_POST, .handler = post_text},
         {.uri = "/api/name", .method = HTTP_POST, .handler = post_name},
         {.uri = "/api/voice", .method = HTTP_POST, .handler = post_voice},
-        {.uri = "/api/file", .method = HTTP_GET, .handler = get_file},
-        {.uri = "/api/file", .method = HTTP_POST, .handler = post_file},
         {.uri = "/api/play", .method = HTTP_POST, .handler = post_play},
     };
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
