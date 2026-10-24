@@ -121,7 +121,7 @@ de "qué hay que invalidar". Los datos (edades, ruido, llamada en curso) cambian
 | Pantalla | Título | Contenido |
 |---|---|---|
 | **Inicio** | Nombre de la placa | Vecinos y nodos en la red, barra de ruido, último mensaje y las teclas dibujadas en su posición física (se rellenan al apretarlas) |
-| **Mensajes** | `MENSAJES` (o `MSJ 4:oir` / `4:parar` sobre una voz) | Lista con marca de tipo: `!` alerta, `@` privado, `>` voz (`*` sonando), `#` archivo, `"` texto. Las alertas graves van invertidas |
+| **Mensajes** | `MENSAJES` (o `MSJ 4:oir` / `4:parar` sobre una voz) | Lista con marca de tipo: `!` alerta, `@` privado, `>` voz (`*` sonando), `"` texto. Las alertas graves van invertidas |
 | **Red** | `RED` + el ID propio (para dictarlo) | `Todos`, después el historial: placas con ruido y saltos, celus como `Nombre@Placa`, los que no están con `--` y hace cuánto |
 
 Superpuestos, con prioridad de arriba hacia abajo:

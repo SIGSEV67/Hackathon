@@ -148,7 +148,7 @@ redundante, contención por el canal y colisiones. El código los ataca así:
 | **TTL = 6** | Kconfig `SIGSEV_MESH_TTL` | Que un paquete recorra más de 6 saltos (~1 km en el mejor caso). |
 | **Jitter de 0–8 ms** | `tx_task` | Que todos los vecinos que escucharon el mismo paquete lo retransmitan en el mismo instante y choquen. Cada uno espera un tiempo al azar. |
 
-Además, quien manda ráfagas (voz, archivos) espera 5 ms entre bloques para
+Además, quien manda ráfagas (voz) espera 5 ms entre bloques para
 dejar lugar a los reenvíos de los vecinos.
 
 ### Deduplicación

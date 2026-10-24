@@ -25,7 +25,7 @@ flowchart TD
     main["main<br/>main.c (arranque) · controls.c (teclas → acciones)"]
     ui["ui<br/>pantallas del OLED"]
     web["web<br/>portal, API, app"]
-    messages["messages<br/>alertas, texto, voz, archivos,<br/>store, courier, repair"]
+    messages["messages<br/>alertas, texto, voz,<br/>store, courier, repair"]
     call["call<br/>llamadas walkie"]
     presence["presence<br/>directorio de placas y celus"]
     ranging["ranging<br/>distancia FTM / RSSI"]
@@ -175,7 +175,7 @@ protegida). Prioridad más alta = corre primero. Estos son los del proyecto:
 | `player` | 6 | 3 KB | Reproduce voces guardadas | `messages/player.c` |
 | `mic` | 5 | 4 KB | Lee el mic y reparte a los suscriptores | `periph/audio.c` |
 | `voice` | 5 | 4 KB | Cierra grabaciones y manda voces | `messages/voice.c` |
-| `sender` | 5 | 3 KB | Manda rangos de bloques (archivos, reenvíos, reparaciones) | `messages/sender.c` |
+| `sender` | 5 | 3 KB | Manda rangos de bloques de voz (reenvíos, reparaciones) | `messages/sender.c` |
 | `httpd` | 5 | 6 KB | Servidor web (uno solo atiende todos los pedidos) | `web/web.c` |
 | `courier` | 4 | 4 KB | Reenvía privados pendientes | `messages/courier.c` |
 | `presence` | 4 | 3 KB | Manda el beacon y la lista de celus | `presence/presence.c` |
@@ -233,8 +233,7 @@ La PSRAM octal del módulo usa internamente los GPIO 33–37 y el display usa 36
 |---|---|---|
 | RAM | ~512 KB internos + 8 MB PSRAM | ~380 KB libres al arrancar, sin PSRAM |
 | Pantalla | no (todo el dibujo es no-op y se loguea un resumen por serie) | sí |
-| Memoria para voces y archivos | 4 MB (~15 min de voz) | 96 KB (~20 s de voz) |
-| Archivo máximo | 1 MB | 48 KB |
+| Memoria para voces | 4 MB (~15 min de voz) | 96 KB (~20 s de voz) |
 | Config | `sdkconfig.defaults` | `sdkconfig.defaults` + `sdkconfig.defaults.display` |
 
 En `board.h`, con PSRAM los pines del LCD **ni siquiera se definen**, y
@@ -254,7 +253,7 @@ config SIGSEV_VOICE_STORE_KB
 
 Todo lo ajustable está en Kconfig (`idf.py menuconfig` → menús *SIGSEV: …*), no
 en `#define` sueltos: canal WiFi, celus por placa, TTL, jitter de reenvío,
-timeout de vecinos, largo de voz, memoria, tamaño de archivo, ganancia,
+timeout de vecinos, largo de voz, memoria, ganancia,
 parlante (pines y volumen), rotación del display, calibración de distancia,
 easter egg. Así
 se cambia sin tocar código y cada opción tiene su ayuda.

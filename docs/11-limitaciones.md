@@ -69,7 +69,6 @@ rebota, y se reenvía otra vez.
   Lo correcto sería desalojar primero lo que ya está entregado o es para todos.
 - Sin PSRAM entran ~20 s de voz en total (96 KB). Cada voz nueva desaloja las
   viejas. Con PSRAM, ~15 min.
-- Sin PSRAM, un archivo de 48 KB ocupa la mitad del presupuesto.
 - Nada sobrevive a un reinicio salvo nombres e historial (NVS): los mensajes se pierden.
 
 ## 4. Tiempo
@@ -94,7 +93,7 @@ rebota, y se reenvía otra vez.
   abrir la app (la placa lo detecta y los entrega).
 - **4 celulares por placa** (configurable hasta 10). Más es más tráfico de
   polling y menos aire para ESP-NOW.
-- **El servidor web tiene un solo task:** mientras un celu sube un archivo, los
+- **El servidor web tiene un solo task:** mientras un celu sube un audio, los
   demás esperan para refrescar.
 - **Cambiar el nombre de la placa** cambia el SSID recién al reiniciar.
 - **Las llamadas solo son entre placas** y viajan por flooding: cada placa
@@ -115,7 +114,7 @@ rebota, y se reenvía otra vez.
 |---|---|
 | **Probado en placa** (2 placas) | Arranque, descubrimiento mutuo (~3 s), mesh, pantalla en las dos, joystick con la corrección de 45°, FTM entre placas (13–14 mediciones válidas por sesión), inicialización del parlante |
 | **Usado en versiones anteriores**; confirmar y reprobar después de los últimos cambios | Alertas, texto y voz entre placas; privados entre placas |
-| **Solo compilado** | Easter egg (código, comando por USB, aviso a la red), reproducción por parlante (no había parlante conectado), llamadas, audio desde el celu, fotos y archivos, reparación de bloques, grabaciones largas con segmentos, FTM a 3–5 m |
+| **Solo compilado** | Easter egg (código, comando por USB, aviso a la red), reproducción por parlante (no había parlante conectado), llamadas, audio desde el celu, reparación de bloques, grabaciones largas con segmentos, FTM a 3–5 m |
 | **Compilado y probado contra una API simulada** (en la PC), no en placa | Todo el modelo de clientes: identidad del celu, privados celu a celu, ✓/✓✓, cambio de placa, walkie por clips |
 
 ## 7. Deuda técnica
@@ -126,7 +125,7 @@ rebota, y se reenvía otra vez.
 - `flash.sh` usa `psram` por defecto, pero las dos placas de la demo usan `display`.
 - El commit `4f38906` no compila solo (el siguiente lo arregla): un `git bisect`
   tiene que saltearlo.
-- `app.js` es un solo archivo de ~840 líneas; si crece, conviene partirlo en módulos.
+- `app.js` es un solo archivo de ~730 líneas; si crece, conviene partirlo en módulos.
 
 ## 8. Trabajo futuro (además de lo de arriba)
 

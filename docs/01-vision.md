@@ -24,11 +24,11 @@ Sobre esa red se apoyan dos tipos de **usuarios** (clientes):
 
 1. **El celular**, el usuario principal. Se conecta al WiFi abierto de la placa
    más cercana (`SIGSEV-XXXX`), se le abre solo un portal y desde el navegador
-   manda alertas, texto, voz, fotos y archivos. No instala nada.
+   manda alertas, texto y voz. No instala nada.
 2. **La placa misma**, para quien no tiene celular, no quiere usarlo o se quedó
    sin batería. Con sus botones y su pantalla manda alertas y voces, las
-   escucha y llama a otras placas tipo walkie-talkie. No puede ver fotos ni
-   archivos, pero participa de la red como cualquier otro usuario.
+   escucha y llama a otras placas tipo walkie-talkie. No puede escribir ni leer
+   texto largo, pero participa de la red como cualquier otro usuario.
 
 ```mermaid
 flowchart LR
@@ -86,7 +86,7 @@ banda** habilita cosas que con LoRa no se pueden hacer.
 | Alcance por salto | km | ~100–200 m en línea de vista |
 | Ancho de banda | ~0,3–20 kbps según configuración | 1 Mbps (tasa de ESP-NOW por defecto) |
 | Latencia por salto | cientos de ms a segundos | milisegundos |
-| Qué viaja | texto corto | voz, fotos, archivos, alertas, topología y ruido |
+| Qué viaja | texto corto | voz, texto, alertas, topología y ruido |
 | Uso desde el celular | app propia + Bluetooth | cualquier navegador, sin instalar nada |
 | Hardware extra | módulo LoRa | ninguno: el WiFi ya viene en el ESP32 |
 | Distancia entre nodos | no | sí, medida por WiFi (FTM) |
@@ -106,7 +106,6 @@ salto alcanzan, y la densidad hace que haya muchos caminos.
 | Texto a todos o privado | ✔ | — (no hay teclado) |
 | Voz a todos o privada | ✔ (grabador del sistema) | ✔ (KEY4, push-to-talk) |
 | Escuchar voces | ✔ | ✔ si tiene parlante |
-| Fotos y archivos | ✔ (las fotos se achican solas) | — (los guarda y reenvía, no los muestra) |
 | Walkie por clips (audios que salen y suenan solos) | ✔ | — |
 | Llamada en vivo (half-duplex) | — | ✔ entre placas |
 | Mapa de la red con distancias y ruido | ✔ | lista de nodos |

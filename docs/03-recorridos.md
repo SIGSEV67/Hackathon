@@ -6,7 +6,7 @@ concreto. Cada recorrido dice qué función corre, en qué archivo y en qué tas
 - [A. Una alerta SOS desde la placa](#a-una-alerta-sos-desde-la-placa)
 - [B. Un privado de texto a alguien que no está](#b-un-privado-de-texto-a-alguien-que-no-está)
 - [C. Una voz grabada en la placa](#c-una-voz-grabada-en-la-placa)
-- [D. Una foto desde el celular, con paquetes perdidos](#d-una-foto-desde-el-celular-con-paquetes-perdidos)
+- [D. Una voz desde el celular, con paquetes perdidos](#d-una-voz-desde-el-celular-con-paquetes-perdidos)
 - [E. Una llamada entre dos placas](#e-una-llamada-entre-dos-placas)
 
 ---
@@ -178,39 +178,36 @@ bloque, perder uno es un silencio de 55 ms y nada más.
 
 ---
 
-## D. Una foto desde el celular, con paquetes perdidos
+## D. Una voz desde el celular, con paquetes perdidos
 
-**Situación:** Lucho manda una foto de 3 MB a todos desde una placa sin PSRAM (límite 48 KB).
+**Situación:** Lucho graba un audio de 15 s en el celular y lo manda a todos.
 
-1. **Achicar.** `sendFile` (`app.js`) ve que es una foto más grande que el 90 %
-   del límite: la dibuja en un `<canvas>` cada vez más chico (1280, 1024, 800…
-   px de lado) y la recomprime a JPEG con calidad decreciente (0,8 → 0,35) hasta
-   que entra. Una foto de celular suele quedar en ~40 KB a 640 px.
-2. **Subida.** `POST /api/file` con el JPEG en el body, `Content-Type: image/jpeg`
-   y el nombre en `X-File-Name` (URL-encoded, por los acentos).
-3. **API.** `post_file` (`api.c`) valida el tamaño, crea el mensaje
-   (`messages_file_begin`), lee el body de a 1 KB y lo va cortando en bloques de
-   220 bytes (`messages_file_write`). Al terminar (`messages_file_end`), si
-   llegó entero, encola el envío: `sender_post(id, 0, bloques, info=true)`.
-4. **Envío.** El task `sender` manda primero un paquete `FILE_INFO` (nombre,
-   tipo, tamaño) y después cada bloque como `FILE`, 5 ms entre uno y otro.
-5. **Recepción.** `on_info` y `on_chunk` (`messages/files.c`) crean el mensaje
-   con lo que llegue primero: si se perdió `FILE_INFO`, los bloques igual se
-   guardan y los datos del archivo se piden después.
-6. **Reparación.** Supongamos que en una placa llegaron 210 de 218 bloques. El
+1. **Grabar.** *● Grabar audio* abre el grabador del sistema (`<input type="file"
+   accept="audio/*" capture>`): el portal es HTTP y el navegador no da el
+   micrófono fuera de HTTPS (ver [06](06-audio-llamadas.md)).
+2. **Convertir.** `sendAudioFile` (`app.js`) decodifica el audio con Web Audio y
+   `toVoicePcm` lo pasa a mono, 8 kHz, 16 bits, normalizado y recortado al largo máximo.
+3. **Subida.** `POST /api/voice` con el PCM crudo en el body.
+4. **API.** `post_voice` (`api.c`) crea el mensaje (`messages_voice_import_begin`),
+   lee el body de a 440 muestras y cada bloque lo codifica a ADPCM y lo guarda
+   (`messages_voice_import_block`). Al terminar, `messages_voice_import_end`
+   le pasa el mensaje al task `voice`, que lo manda como cualquier grabación.
+5. **Envío.** 273 paquetes `VOICE`, 5 ms entre uno y otro.
+6. **Reparación.** Supongamos que en una placa llegaron 265 de 273 bloques. El
    task `repair` (`messages/repair.c`) revisa cada 500 ms los mensajes
    incompletos que le interesan. Si pasó 1,5 s sin bloques nuevos, arma un
    `NACK` con los rangos que faltan (`store_missing`: "40–42, 117, 201–204") y lo
    inunda.
 7. **Quién contesta.** El origen (la placa de Lucho, porque Lucho es su cliente
    local) recibe el NACK (`on_nack`) y encola esos rangos en el `sender`. Si el
-   origen ya no estuviera en la red, contestaría cualquier placa que tenga el
-   archivo. Se reintenta hasta 6 veces seguidas sin progreso.
-8. **Ver.** Cuando completa, el celular de otro usuario lo muestra: si es imagen,
-   como miniatura (`<img src="/api/file?id=…&c=…">`); si no, con un link para bajarlo.
+   origen ya no estuviera en la red, contestaría cualquier placa que tenga la
+   voz. Se reintenta hasta 6 veces seguidas sin progreso.
+8. **Escuchar.** Cuando completa, los celus la ven en el feed y la placa avisa en
+   la pantalla.
 
-A una voz le faltan bloques y suena con huecos; a un archivo no le puede faltar
-ninguno. El mismo mecanismo de NACK sirve para las dos cosas.
+Aun sin reparar, una voz con bloques perdidos se escucha: cada bloque lleva su
+estado del códec, así que un bloque perdido es un silencio de 55 ms. La
+reparación tapa esos huecos.
 
 ---
 

@@ -8,11 +8,10 @@ celular colapsa, un corte de luz o un lugar sin señal.
 - **Alertas rápidas** (SOS, MÉDICO, PELIGRO, ESTOY BIEN) con un botón de la placa o desde el celular.
 - **Mensajes de voz** push-to-talk: se graban en la placa y viajan comprimidos por la mesh.
 - **Texto libre** desde el celular.
-- **Mensajes privados** (texto, voz o archivos) a un celu o a una placa, aunque no esté en la red:
+- **Mensajes privados** (texto o voz) a un celu o a una placa, aunque no esté en la red:
   las placas lo guardan y se lo pasan cuando aparece (store-and-forward), con ✓ al llegar y ✓✓ al verlo.
 - **Llamadas** entre placas tipo walkie-talkie: se habla en vivo con la tecla apretada.
-- **Voces desde el celular** y **fotos/archivos** (las fotos se achican solas para que entren);
-  entre celus, **walkie por clips**: lo que grabás sale solo y lo del otro suena solo.
+- **Voces desde el celular**; entre celus, **walkie por clips**: lo que grabás sale solo y lo del otro suena solo.
 - **Parlante en la placa** para escuchar las voces.
 - **Mapa de la red y del ruido**: qué nodos hay, cómo están enlazados, cuánto ruido mide cada uno y a
   **qué distancia** están (medida por WiFi FTM, o estimada por señal).
@@ -26,10 +25,10 @@ por los demás.
 
 **Placas y clientes.** Las placas son la red; los celulares se conectan a una
 placa (su *padre*) y la usan de bastión. Cada celu es un usuario con su propio
-ID y nombre: puede escribirle, mandarle voz o archivos en privado a otro celu
+ID y nombre: puede escribirle o mandarle voz en privado a otro celu
 o a una placa, y ve solo lo suyo (más lo que es para todos). La placa también
 es un usuario: con sus botones y su pantalla manda alertas y voces, escucha,
-y llama a otras placas, sin poder ver media. Si un celu se pasa a otra placa,
+y llama a otras placas, sin poder escribir texto. Si un celu se pasa a otra placa,
 sus privados lo siguen.
 
 ## ¿Por qué no LoRa?
@@ -83,9 +82,8 @@ un toque sin querer no dispare nada.
 1. Conectarse al WiFi abierto `SIGSEV-XXXX` (cada nodo publica el suyo).
 2. El portal se abre solo; si no, entrar a `http://192.168.4.1/`.
 3. Pestañas:
-   - **Alertas**: botones de alerta (mantener apretado), texto, **● Grabar audio**,
-     **＋ Foto / archivo** y el feed (voces para escuchar en el celu o *▶ en la
-     placa*, fotos que se ven ahí mismo, archivos para bajar). En **Para** se elige
+   - **Alertas**: botones de alerta (mantener apretado), texto, **● Grabar audio**
+     y el feed (voces para escuchar en el celu o *▶ en la placa*). En **Para** se elige
      *Todos*, un celu o una placa del historial, u *Otro ID…* (las 8 cifras, o las
      últimas si alcanzan para identificarlo). Los privados propios muestran *en
      camino…*, después ✓ (llegó a la placa del destino) y ✓✓ (el destino lo vio).
@@ -104,9 +102,6 @@ HTTP, decodifica lo que devuelve: lo pasa a mono a 8 kHz y la placa lo codifica
 en ADPCM como si lo hubiera grabado ella. En Android abre la grabadora; en iPhone,
 según la versión, puede ofrecer elegir un archivo de audio.
 
-**Archivos.** Hasta 48 KB sin PSRAM y 1 MB con PSRAM. Las fotos se achican y se
-recomprimen a JPEG en el celular hasta que entran.
-
 ## Arquitectura
 
 ```
@@ -121,7 +116,7 @@ components/
   mesh/          flooding con TTL y dedup, vecinos con RSSI, handlers por tipo
   presence/      beacons: directorio de nodos, nombres, ruido, topología
   ranging/       distancia a los vecinos: WiFi FTM, o RSSI si no hay
-  messages/      alertas, texto, voz y archivos + store (PSRAM si hay), courier de
+  messages/      alertas, texto y voz + store (PSRAM si hay), courier de
                  privados, repair de bloques perdidos y reproductor
   call/          llamadas walkie-talkie en vivo
   web/           DNS cautivo, servidor HTTP, API JSON y app web embebida
@@ -166,16 +161,14 @@ versión, tipo, TTL, saltos, seq y origen. Cada nodo reenvía una sola vez cada
 | `TEXT` | origen, ref, destino y hasta 160 bytes UTF-8 |
 | `VOICE` | origen, ref, destino y un bloque de 55 ms de IMA ADPCM a 8 kHz, con su propio estado del códec |
 | `ACK` | origen y ref de un privado, y si llegó a la placa del destino o el destino lo vio |
-| `FILE_INFO` | origen, ref, destino, tamaño, tipo y nombre de un archivo |
-| `FILE` | origen, ref, destino y un pedazo de 220 B de archivo |
-| `NACK` | origen, ref y rangos de bloques que le faltan a alguien (voz o archivo) |
+| `NACK` | origen, ref y rangos de bloques de una voz que le faltan a alguien |
 | `CALL` | señalización de llamada (invitar, atender, colgar, ocupado, ping) y audio en vivo |
 | `KIWI` | easter egg: "explotá y reiniciate" (magic y el número de ronda) |
 
-**Bloques perdidos.** El flooding no reintenta. Quien tiene una voz o un archivo
-incompleto y deja de recibir durante 1,5 s inunda un `NACK` con los rangos que
-le faltan. Contesta el origen, o cualquier nodo que los tenga si el origen ya no
-está. A una voz le sirve para tapar huecos; a un archivo, para llegar entero.
+**Bloques perdidos.** El flooding no reintenta. Quien tiene una voz incompleta
+y deja de recibir durante 1,5 s inunda un `NACK` con los rangos que le faltan.
+Contesta el origen, o cualquier nodo que los tenga si el origen ya no está. Así
+se tapan los huecos de la voz.
 
 **Distancia.** Las placas corren el WiFi como AP+STA: el AP contesta FTM
 (802.11mc, tiempo de vuelo) y la STA, que nunca se conecta a nada, lo inicia
@@ -253,8 +246,7 @@ cc -I components/adpcm/include test/host/test_adpcm.c components/adpcm/adpcm.c -
 - *SIGSEV: radio*: canal WiFi, máximo de celulares por nodo y FTM.
 - *SIGSEV: ranging*: offset de FTM (para calibrar con dos placas a 1 m) y modelo de RSSI.
 - *SIGSEV: mesh*: TTL, jitter de reenvío y timeout de vecinos.
-- *SIGSEV: messages*: duración máxima de voz, memoria para voces y archivos, tamaño máximo de archivo
-  y ganancia máxima.
+- *SIGSEV: messages*: duración máxima de voz, memoria para voces y ganancia máxima.
 - *SIGSEV: hardware (periph)*: parlante (prendido; pines y volumen) y rotación del display.
 - *SIGSEV: easter egg*: prende el easter egg (prendido por defecto; apagarlo para uso real).
 

@@ -1,6 +1,6 @@
 # 05 · Mensajes
 
-`components/messages/` es el corazón funcional: alertas, texto, voz y archivos;
+`components/messages/` es el corazón funcional: alertas, texto y voz;
 dónde se guardan; quién los ve; cómo se completan si llegan rotos y cómo llegan
 a alguien que no estaba.
 
@@ -12,7 +12,6 @@ a alguien que no estaba.
 | `store.c` / `store.h` | Almacenamiento de mensajes y bloques |
 | `alerts.c` | Alertas y texto |
 | `voice.c` | Grabación, importación desde el celu, envío, recepción y decodificación de voz |
-| `files.c` | Archivos |
 | `sender.c` | Task que manda rangos de bloques |
 | `repair.c` | Pedidos de bloques perdidos (NACK) |
 | `courier.c` | Entrega de privados (store-and-forward) y confirmaciones |
@@ -23,7 +22,7 @@ a alguien que no estaba.
 ```c
 typedef struct {
     uint32_t id;             // id LOCAL en el store de esta placa (1, 2, 3…)
-    message_kind_t kind;     // ALERT, TEXT, VOICE, FILE
+    message_kind_t kind;     // ALERT, TEXT, VOICE
     mesh_node_id_t origin;   // quién lo mandó: una placa o un celu
     uint16_t ref;            // número del mensaje según su origen
     mesh_node_id_t dest;     // 0 = para todos; si no, privado
@@ -32,10 +31,8 @@ typedef struct {
     uint8_t hops;            // saltos que dio; 0xff = salió de esta placa
     uint32_t received_ms;    // cuándo llegó (reloj local)
     alert_kind_t alert;
-    char text[161];          // texto, o nombre del archivo
-    uint16_t blocks, blocks_received;   // voz y archivos
-    uint32_t file_size;
-    char mime[32];
+    char text[161];          // texto
+    uint16_t blocks, blocks_received;   // voz
 } message_t;
 ```
 
@@ -44,7 +41,7 @@ Dos identidades, a propósito:
 - **`id`** es local y sirve para la API y la pantalla (`/api/voice?id=12`). Cada
   placa numera a su manera.
 - **`(origin, ref)`** es global: identifica el mismo mensaje en todas las
-  placas. Viaja **dentro del payload** de texto, voz y archivos (no solo en el
+  placas. Viaja **dentro del payload** de texto y voz (no solo en el
   header de la mesh), para que una placa que lo custodia lo pueda reenviar
   tal cual y quien lo reciba lo reconozca como repetido. `ref` arranca en un
   valor al azar en cada arranque para no repetir refs de antes de un reinicio.
@@ -79,7 +76,7 @@ los tasks de envío pueden usarlo a la vez.
 
 ### Bloques en segmentos
 
-Voces y archivos tienen bloques de 220 bytes de datos (224 con el estado del
+Las voces tienen bloques de 220 bytes de datos (224 con el estado del
 códec y la marca de presente). No se guardan en un arreglo contiguo, sino en
 **segmentos de 32 bloques (~7 KB)** que se reservan cuando llega el primer
 bloque de cada uno:
@@ -105,7 +102,7 @@ contigua (81 KB) no entraría nunca. Con segmentos:
 
 Los segmentos salen de un presupuesto: 96 KB sin PSRAM, 4 MB con PSRAM
 (`CONFIG_SIGSEV_VOICE_STORE_KB`). Si un bloque nuevo no entra en el
-presupuesto o no hay memoria, se **desaloja la voz o el archivo más viejo**
+presupuesto o no hay memoria, se **desaloja la voz más vieja**
 (nunca el que se está llenando) y se reintenta. Con PSRAM, los segmentos se
 piden preferentemente ahí (`heap_caps_calloc_prefer(…, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT)`).
 
@@ -146,37 +143,20 @@ los mensajes:
 **Por qué el celu manda PCM y no ADPCM:** así el códec existe en un solo lugar
 (la placa). La web solo baja la frecuencia a 8 kHz y normaliza.
 
-## 6. Archivos (`files.c`)
+## 6. Envío en segundo plano (`sender.c`)
 
-- Pedazos de 220 bytes (los mismos bloques del store que la voz).
-- Un paquete `FILE_INFO` con nombre (≤40 bytes), tipo MIME (≤31) y tamaño, que
-  se repite al principio de cada envío y de cada reenvío.
-- Un paquete `FILE` por pedazo.
-- Límite: 48 KB sin PSRAM, 1 MB con PSRAM (`CONFIG_SIGSEV_FILE_MAX_KB`).
-  Sin PSRAM se mantiene muy por debajo del presupuesto (96 KB) para que un
-  archivo no desaloje todas las voces.
-- Un solo archivo se sube a la vez (el servidor web tiene un solo task).
-
-Los bloques y los datos del archivo pueden llegar en cualquier orden:
-`find_or_add` crea el mensaje con lo primero que llegue, y lo que falte se pide
-con NACK (`n_ranges = 0` significa "mandame los datos del archivo").
-
-## 7. Envío en segundo plano (`sender.c`)
-
-Mandar 218 bloques espaciados lleva más de un segundo, y no se puede hacer
-dentro de un handler de la mesh ni de un pedido HTTP. `sender_post(id, start,
-count, info)` encola el trabajo (cola de 16) y el task `sender` lo hace: manda
+Mandar cientos de bloques espaciados lleva más de un segundo, y no se puede
+hacer dentro de un handler de la mesh. `sender_post(id, start, count)` encola el trabajo (cola de 16) y el task `sender` lo hace: manda
 los bloques presentes del rango, con 5 ms entre uno y otro.
 
-Lo usan: la subida de archivos, los reenvíos del courier y las respuestas a
-NACKs. La grabación de la placa usa su propio task (`voice`), porque además
+Lo usan los reenvíos del courier y las respuestas a NACKs. La grabación de la placa usa su propio task (`voice`), porque además
 tiene que cerrar la grabación.
 
-## 8. Reparación de bloques (`repair.c`)
+## 7. Reparación de bloques (`repair.c`)
 
 El flooding no reintenta. Con muchos paquetes seguidos, alguno se pierde.
 
-- Cada 500 ms, el task `repair` revisa las voces y archivos **incompletos que le
+- Cada 500 ms, el task `repair` revisa las voces **incompletas que le
   interesan a alguien de esta placa** y que no salieron de acá.
 - Si un mensaje lleva **1,5 s sin bloques nuevos**, se considera trabado y se
   inunda un `NACK` con hasta 40 rangos de bloques faltantes (`store_missing`).
@@ -193,7 +173,7 @@ receptores. Con NACK solo habla quien tiene un problema, y solo para decir qué
 le falta. Es la idea de los protocolos de multicast confiable como SRM (Floyd
 et al., 1997).
 
-## 9. Privados: el courier (`courier.c`)
+## 8. Privados: el courier (`courier.c`)
 
 ### La idea: store-and-forward epidémico
 
@@ -254,21 +234,21 @@ destino no está, no existe. El flooding con custodia funciona sin conocer la
 topología, a costa de tráfico. Para mensajes de texto y voces cortas, en redes
 de decenas de placas, ese costo es aceptable.
 
-## 10. Reproducción (`player.c`)
+## 9. Reproducción (`player.c`)
 
 Un task decodifica bloque a bloque y escribe al parlante; el DMA del I2S marca
 el ritmo. Pedir otra voz mientras suena una corta la actual. Al final se manda
 un bloque de silencio para vaciar el buffer sin cortar la última palabra.
 Grabar corta la reproducción (si no, el mic grabaría el parlante).
 
-## 11. Eventos
+## 10. Eventos
 
 `messages_notify` publica en `MESSAGES_EVENT` con el `id` local:
 
 | Evento | Cuándo |
 |---|---|
 | `NEW` | Llegó o se mandó un mensaje que le interesa a alguien de esta placa |
-| `UPDATED` | Una voz o un archivo completó, o llegaron los datos de un archivo |
+| `UPDATED` | Una voz terminó de llegar |
 | `DELIVERED` | Cambió la confirmación de un privado (✓ o ✓✓) |
 | `REC_STARTED` / `REC_STOPPED` | Empezó o terminó una grabación en la placa |
 | `PLAY_STOPPED` | Terminó una reproducción |

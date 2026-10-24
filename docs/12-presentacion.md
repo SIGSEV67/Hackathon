@@ -6,13 +6,13 @@ que conviene tener a mano y las preguntas probables. No es un guion cerrado.
 ## El hilo en una frase
 
 > Cuando la red celular colapsa, SIGSEV arma una red propia con placas baratas:
-> cualquier celular se conecta sin instalar nada y puede pedir ayuda, hablar y
-> mandar fotos, incluso a alguien que ahora no está al alcance.
+> cualquier celular se conecta sin instalar nada y puede pedir ayuda, escribir y
+> mandar audios, incluso a alguien que ahora no está al alcance.
 
 ## Estructura sugerida (~7 min)
 
 1. **El problema** (30 s). Una marcha, antenas saturadas, nadie puede avisar
-   que hay un herido. Una imagen vale más que un párrafo.
+   que hay un herido.
 2. **La idea** (1 min). Placas que se pasan los mensajes entre sí, sin
    infraestructura. Los celulares son clientes: se conectan al WiFi de la placa
    más cercana. La placa también se usa sola, con botones.
@@ -20,9 +20,9 @@ que conviene tener a mano y las preguntas probables. No es un guion cerrado.
 4. **Cómo funciona** (1,5 min). Tres ideas, una diapositiva cada una:
    - **Flooding:** cada placa reenvía una vez lo que escucha (dedup, TTL, jitter).
    - **Custodia:** si el destino no está, las placas lo guardan y se lo pasan cuando aparece. ✓ y ✓✓.
-   - **Radio rápida:** ESP-NOW a 1 Mbps permite voz y fotos, cosa que LoRa no.
+   - **Radio rápida:** ESP-NOW a 1 Mbps permite voz, cosa que LoRa no.
 5. **Lo que lo hace distinto** (30 s). La tabla contra LoRa (documento 01):
-   voz, fotos, cualquier navegador, distancia medida, sin hardware extra.
+   voz, cualquier navegador, distancia medida, sin hardware extra.
 6. **Honestidad** (30 s). No está cifrado y el flooding no escala a cientos de
    placas; contamos qué haríamos (documento 11). Muestra que entendemos el
    sistema, no solo que lo hicimos andar.
@@ -41,7 +41,7 @@ ponerles nombre (*Vos → Tu nombre*).
 | 4 | Pestaña *Red* en el celu | Mapa con las placas, la distancia y el ruido; los celus colgando de su placa | La red conoce su propia forma |
 | 5 | Celu A → privado a celu B | En A: *en camino…* → ✓ → ✓✓ | Las dos tildes |
 | 6 | Apagar la placa de B, mandarle otro privado desde A, volver a prenderla | El mensaje llega solo cuando B vuelve | Store-and-forward: el destino no tenía que estar |
-| 7 | Mandar una foto desde un celu | Aparece en el otro | Algo imposible con LoRa |
+| 7 | Grabar un audio en un celu y mandarlo | Suena en el otro celu (y en la placa, con *▶ en la placa*) | 15 s de voz salen en ~2 s; con LoRa, minutos |
 | 8 | (Con parlante) Llamada entre placas con KEY1 + KEY4 | Walkie en vivo | Voz en tiempo real por la mesh |
 | 9 | Cierre: código Konami en una placa (o `tools/konami.py`) | El kiwi baila el "6 7", explota y **todas** las placas lo repiten y se reinician | Un solo paquete llega a toda la red en milisegundos; y se vuelven a encontrar solas en ~3 s |
 
@@ -58,12 +58,11 @@ capturas de la web con la API simulada (`docs/` + un servidor mock).
 | Descubrimiento | ~3 s |
 | Voz | 8 kHz, ADPCM 4 bits = 32 kbps; bloques de 55 ms independientes |
 | Voz de 20 s | ~80 KB, ~364 paquetes, sale en ~2,5 s |
-| Archivo máximo | 48 KB sin PSRAM, 1 MB con PSRAM |
 | Memoria de mensajes | 48 mensajes; voz: ~20 s sin PSRAM, ~15 min con PSRAM |
 | Reintentos de un privado | espera al azar 0,5–3 s al aparecer el destino; cada 20 s, hasta 5 veces |
 | Distancia | FTM ±1–2 m al aire libre; RSSI ±×2 |
 | Celulares por placa | 4 (configurable hasta 10) |
-| Código | ~7400 líneas de C (firmware: 13 componentes + main) y ~840 de JS (app) |
+| Código | ~7500 líneas de C (firmware: 14 componentes + main) y ~730 de JS (app) |
 
 ## Preguntas probables
 

@@ -88,18 +88,16 @@ Todos los endpoints requieren `c=<id del celu>` (8 hexa).
 
 | Método y ruta | Parámetros | Hace |
 |---|---|---|
-| `GET /api/state` | — | Placa (`self`), cliente (`me`), placas vivas con sus enlaces, historial (`known`, con `client` y `parent` para celus), estadísticas, si se está grabando, límites (`voice_max_s`, `file_max`) y si hay parlante |
+| `GET /api/state` | — | Placa (`self`), cliente (`me`), placas vivas con sus enlaces, historial (`known`, con `client` y `parent` para celus), estadísticas, si se está grabando, el largo máximo de voz (`voice_max_s`) y si hay parlante |
 | `GET /api/messages` | `after` (opcional) | Mensajes del cliente, del más nuevo al más viejo. Después de responder, marca leídos sus privados completos |
 | `GET /api/voice` | `id` | La voz como WAV (16 bits, 8 kHz), decodificada al vuelo |
-| `GET /api/file` | `id` | El archivo, con su `Content-Type`. `409` si todavía está llegando |
 | `POST /api/alert` | `kind` (0–3) | Manda una alerta |
 | `POST /api/text` | `to` (opcional) | Manda el body como texto (≤160 bytes) |
 | `POST /api/voice` | `to` (opcional) | Body: PCM 16 bits mono 8 kHz. La placa lo codifica y lo manda |
-| `POST /api/file` | `to` (opcional) | Body: el archivo. `Content-Type` es su tipo; `X-File-Name`, su nombre |
 | `POST /api/play` | `id` | Reproduce la voz en el parlante de la placa. `501` si no hay parlante |
 | `POST /api/name` | — | Renombra **la placa** con el body (≤20 bytes) |
 
-Un celu solo puede pedir voces y archivos que son para él (`messages_for_client`):
+Un celu solo puede pedir voces que son para él (`messages_for_client`):
 si no, recibe `404`, como si no existieran.
 
 Ejemplo de un mensaje en `/api/messages`:
@@ -112,7 +110,7 @@ Ejemplo de un mensaje en `/api/messages`:
 
 ## 5. La app
 
-Un solo archivo de JS (`app.js`, ~840 líneas) sin dependencias: se sirve desde
+Un solo archivo de JS (`app.js`, ~730 líneas) sin dependencias: se sirve desde
 la placa y el celular no tiene internet para bajar una biblioteca.
 
 ### Polling, no WebSockets
@@ -133,7 +131,7 @@ confirmaciones.
 
 - **Alertas:** botones de alerta (mantener 0,9 s; la animación muestra el
   progreso), selector *Para* (Todos, el historial o un ID a mano), texto, *●
-  Grabar audio*, *＋ Foto / archivo*, el modo *Walkie* y el feed.
+  Grabar audio*, el modo *Walkie* y el feed.
 - **Red:** el mapa (ver [07](07-distancia.md)) y la lista de placas y celus con ✉
   para escribirles.
 - **Vos:** tu nombre e ID, la placa a la que estás conectado, renombrarla y el tráfico.
@@ -143,13 +141,9 @@ confirmaciones.
 - **Feed:** los privados llevan la etiqueta PRIVADO; los propios muestran *en
   camino…*, *✓ entregado* o *✓✓ visto*. Lo que llega nuevo vibra
   (`navigator.vibrate`) y muestra un banner.
-- **Fotos:** se achican y recomprimen en el celu (`shrinkImage`: canvas a
-  1280→240 px, JPEG 0,8→0,35) hasta que entran en el límite. Las miniaturas se
-  cachean (`app.thumbs`) para no volver a pedirlas en cada refresco.
 - **Selector de destino:** se rehace solo si cambió la lista, para no cerrarle
   el menú a quien lo tiene abierto. Un ID a mano se acepta completo o por sus
   últimas cifras (las que muestra la pantalla de la placa), si no hay ambigüedad.
-- **Nombres de archivo:** se cortan a 40 bytes de UTF-8 sin partir un carácter (`shortName`).
 
 ### Estilo
 

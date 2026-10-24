@@ -44,8 +44,8 @@ código; si se cambia una constante, conviene actualizar el documento.
 | **Courier** | El módulo que hace esos reenvíos (`components/messages/courier.c`). |
 | **Store-and-forward** | Guardar y reenviar más tarde, cuando hay camino. |
 | **ACK** | Confirmación. Hay dos: *entregado* (✓, llegó a la placa del destino) y *leído* (✓✓, lo vio el celu destino). |
-| **NACK** | Pedido de los bloques que faltan de una voz o un archivo. |
-| **Bloque** | Pedazo de 220 B: 55 ms de voz comprimida o 220 B de un archivo. |
+| **NACK** | Pedido de los bloques que faltan de una voz. |
+| **Bloque** | Pedazo de 220 B: 55 ms de voz comprimida. |
 | **ADPCM** | Códec de audio simple: 4 bits por muestra. |
 | **FTM** | *Fine Timing Measurement* (802.11mc): medir distancia por tiempo de vuelo del WiFi. |
 | **RSSI** | Potencia con la que llega una señal (dBm). Sirve para estimar distancia, mal. |

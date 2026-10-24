@@ -35,8 +35,7 @@ va en el payload.
 | 3 | `TEXT` | messages/alerts | 11 + largo (≤ 171) | al mandar, y en reenvíos de custodia |
 | 4 | `VOICE` | messages/voice | 238 | un paquete por bloque de 55 ms |
 | 5 | `ACK` | messages/courier | 7 | entregado / leído |
-| 6 | `FILE_INFO` | messages/files | 49 + nombre (≤ 89) | al principio de cada envío de archivo |
-| 7 | `FILE` | messages/files | 234 | un paquete por pedazo de 220 B |
+| 6, 7 | — | — | — | libres: eran los archivos, que se sacaron. No se reusan para no correr los demás números |
 | 8 | `NACK` | messages/repair | 7 + 4·rangos (≤ 167) | cuando algo se traba |
 | 9 | `CALL` | call | 7 (señalización) / 232 (audio) | 1/s al sonar, 1 cada 2 s en llamada, 1 cada 55 ms al hablar |
 | 10 | `CLIENTS` | presence | 1 + 24·celus (≤ 193) | después de cada beacon, si hay celus |
@@ -92,22 +91,6 @@ Quien recibe anota `parent` = `origin` del header.
 | `reserved` | u8 | 0 |
 | `data` | u8[220] | 440 muestras de 4 bits (nibble bajo primero) |
 
-## `FILE_INFO` y `FILE` · `messages/files.c`
-
-`FILE_INFO`:
-
-| Campo | Tipo | |
-|---|---|---|
-| `origin`, `ref`, `dest` | u32, u16, u32 | |
-| `size` | u32 | bytes del archivo |
-| `count` | u16 | pedazos = ⌈size / 220⌉ |
-| `mime` | char[32] | tipo MIME, terminado en `\0` |
-| `name_len` | u8 | ≤ 40 |
-| `name` | char[name_len] | nombre del archivo |
-
-`FILE`: `{origin u32, ref u16, dest u32, index u16, count u16, data u8[220]}`.
-El último pedazo se rellena con ceros; el largo real sale de `size`.
-
 ## `ACK` · `messages/courier.c`
 
 | Campo | Tipo | |
@@ -120,7 +103,7 @@ El último pedazo se rellena con ceros; el largo real sale de `size`.
 | Campo | Tipo | |
 |---|---|---|
 | `origin`, `ref` | u32, u16 | el mensaje incompleto |
-| `n_ranges` | u8 | ≤ 40 · 0 = "mandame los datos del archivo" |
+| `n_ranges` | u8 | ≤ 40 |
 | `ranges[n]` | 4 B c/u | `{start u16, count u16}` bloques que faltan |
 
 ## `CALL` · `call/call.c`
